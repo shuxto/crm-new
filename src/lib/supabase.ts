@@ -1,7 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Get these from your Supabase Dashboard -> Settings -> API
-const supabaseUrl = 'https://zqvvytgglralkoiuhqor.supabase.co';
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpxdnZ5dGdnbHJhbGtvaXVocW9yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3Mzk0ODcsImV4cCI6MjA4MzMxNTQ4N30.3Kx0bJUcy_IK-7EPhgvl_c8moLmJhbarqQtB246etqk';
+// 1. Load variables
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// 2. THE FIX: Validate them immediately
+// This tells TypeScript: "If these don't exist, crash the app. If we pass this line, they are 100% strings."
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error('MISSING SUPABASE KEYS: Check your .env file');
+}
+
+// 3. Create Client (Now TypeScript is happy because it knows they are strings)
+export const supabase = createClient(supabaseUrl, supabaseKey);

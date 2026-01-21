@@ -11,7 +11,7 @@ import LeadProfilePage from './components/LeadProfile';
 import NotificationSystem from './components/NotificationSystem';
 import FileManager from './components/Files';
 import TeamManagement from './components/Team'; 
-import ShufflePage from './components/Shuffle'; // <--- NEW IMPORT
+import ShufflePage from './components/Shuffle'; 
 
 export default function App() {
   const [session, setSession] = useState<any>(null);
@@ -36,6 +36,7 @@ export default function App() {
       source: [] as string[],
       country: [] as string[],
       limit: 50,
+      page: 1, // <--- ADDED PAGE HERE
       tab: 'all' as 'all' | 'mine' | 'unassigned'
   });
 
@@ -43,10 +44,12 @@ export default function App() {
   const toggleStatus = (status: string) => {
     setActiveFilters(prev => {
       const current = prev.status;
+      // Reset to page 1 when filtering
+      const newState = { ...prev, page: 1 }; 
       if (current.includes(status)) {
-        return { ...prev, status: current.filter(s => s !== status) };
+        return { ...newState, status: current.filter(s => s !== status) };
       } else {
-        return { ...prev, status: [...current, status] };
+        return { ...newState, status: [...current, status] };
       }
     });
   };
@@ -61,6 +64,17 @@ export default function App() {
       setSession(session);
     });
     return () => subscription.unsubscribe();
+  }, []);
+
+// NEW: LISTENER FOR BACK BUTTON
+  useEffect(() => {
+    const handleBackButtonClick = () => {
+      const params = new URLSearchParams(window.location.search);
+      const view = params.get('view') || 'dashboard';
+      setCurrentView(view);
+    };
+    window.addEventListener('popstate', handleBackButtonClick);
+    return () => window.removeEventListener('popstate', handleBackButtonClick);
   }, []);
 
   const handleNavigation = (view: string) => {
@@ -113,6 +127,8 @@ export default function App() {
                 filters={activeFilters} 
                 onLeadClick={(lead) => setSelectedLead(lead)} 
                 currentUserEmail={session.user.email}
+                // ADDED PAGINATION HANDLER
+                onPageChange={(newPage) => setActiveFilters(prev => ({ ...prev, page: newPage }))}
             />
           </div>
         )}

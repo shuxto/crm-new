@@ -25,6 +25,7 @@ export interface Agent {
 
 export function useLeads(filters: any, currentUserEmail?: string) {
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [totalCount, setTotalCount] = useState(0); 
   const [statusOptions, setStatusOptions] = useState<any[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,8 +42,11 @@ export function useLeads(filters: any, currentUserEmail?: string) {
     const { data: agentData } = await supabase.from('crm_users').select('id, real_name, role').in('role', ['conversion', 'retention', 'team_leader']).order('real_name', { ascending: true });
     if (agentData) setAgents(agentData);
 
-    // 3. Fetch Leads
-    let query = supabase.from('crm_leads').select('*').order('created_at', { ascending: false }).order('id', { ascending: false });
+    // 3. Fetch Leads with COUNT
+    let query = supabase.from('crm_leads')
+        .select('*', { count: 'exact' }) 
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false });
 
     // --- APPLY FILTERS ---
     if (filters) {
@@ -71,10 +75,20 @@ export function useLeads(filters: any, currentUserEmail?: string) {
         else if (filters.tab === 'mine' && currentUserEmail) query = query.ilike('assigned_to', `%${currentUserEmail}%`); 
     }
 
-    query = query.limit(filters?.limit || 50);
+    // --- PAGINATION LOGIC ---
+    const page = filters?.page || 1;
+    const limit = filters?.limit || 50;
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+    
+    query = query.range(from, to);
 
-    const { data, error } = await query;
-    if (!error) setLeads(data || []);
+    const { data, count, error } = await query;
+    
+    if (!error) {
+        setLeads(data || []);
+        setTotalCount(count || 0);
+    }
     setLoading(false);
   };
 
@@ -95,33 +109,22 @@ export function useLeads(filters: any, currentUserEmail?: string) {
     return () => { supabase.removeChannel(leadSub); };
   }, [filters]);
 
-  // --- ACTIONS ---
+  // --- SINGLE ACTIONS ---
 
   const updateLeadStatus = async (leadId: string, newStatus: string) => {
-    // 1. GET OLD STATUS (We need this to tell the Grid what to decrease)
     const lead = leads.find(l => l.id === leadId);
     const oldStatus = lead ? lead.status : null;
 
-    // 2. OPTIMISTIC UPDATE (Table)
     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus } : l));
     
-    // 3. BROADCAST TO GRID (The Fix 🛠️)
-    // This tells StatsGrid.tsx to update its numbers INSTANTLY
     if (oldStatus && oldStatus !== newStatus) {
-        window.dispatchEvent(new CustomEvent('crm-lead-update', { 
-            detail: { oldStatus, newStatus } 
-        }));
+        window.dispatchEvent(new CustomEvent('crm-lead-update', { detail: { oldStatus, newStatus } }));
     }
 
-    // 4. SEND TO DATABASE
     const { error } = await supabase.from('crm_leads').update({ status: newStatus }).eq('id', leadId);
     
-    if (error) {
-        // Revert on error?
-        console.error("Status Update Failed", error);
-    } else {
-        window.dispatchEvent(new CustomEvent('crm-toast', { detail: { message: `Status updated`, type: 'success' } }));
-    }
+    if (error) console.error("Status Update Failed", error);
+    else window.dispatchEvent(new CustomEvent('crm-toast', { detail: { message: `Status updated`, type: 'success' } }));
   };
 
   const updateLeadAgent = async (leadId: string, agentId: string | null) => {
@@ -131,5 +134,53 @@ export function useLeads(filters: any, currentUserEmail?: string) {
     else window.dispatchEvent(new CustomEvent('crm-toast', { detail: { message: `Agent assigned`, type: 'success' } }));
   };
 
-  return { leads, statusOptions, agents, loading, updateLeadStatus, updateLeadAgent };
+  const deleteLead = async (leadId: string) => {
+    const { error } = await supabase.from('crm_leads').delete().eq('id', leadId);
+    if (error) {
+      window.dispatchEvent(new CustomEvent('crm-toast', { detail: { message: 'Failed to delete lead', type: 'error' } }));
+      return false;
+    }
+    setLeads(prev => prev.filter(l => l.id !== leadId));
+    setTotalCount(prev => prev - 1);
+    window.dispatchEvent(new CustomEvent('crm-toast', { detail: { message: 'Lead deleted successfully', type: 'success' } }));
+    return true;
+  };
+
+  // --- BULK ACTIONS ---
+
+  const bulkUpdateStatus = async (ids: string[], status: string) => {
+    setLeads(prev => prev.map(l => ids.includes(l.id) ? { ...l, status } : l));
+    const { error } = await supabase.from('crm_leads').update({ status }).in('id', ids);
+    if (error) {
+        console.error("Bulk Status Failed", error);
+        return false;
+    }
+    return true;
+  };
+
+  // MODIFIED: Accepts 'string | null' now
+  const bulkUpdateAgent = async (ids: string[], agentId: string | null) => {
+    setLeads(prev => prev.map(l => ids.includes(l.id) ? { ...l, assigned_to: agentId } : l));
+    
+    // Supabase handles 'null' correctly for assigned_to
+    const { error } = await supabase.from('crm_leads').update({ assigned_to: agentId }).in('id', ids);
+    
+    if (error) return false;
+    return true;
+  };
+
+  const bulkDeleteLeads = async (ids: string[]) => {
+    const { error } = await supabase.from('crm_leads').delete().in('id', ids);
+    if (error) return false;
+    
+    setLeads(prev => prev.filter(l => !ids.includes(l.id)));
+    setTotalCount(prev => prev - ids.length);
+    return true;
+  };
+
+  return { 
+    leads, totalCount, statusOptions, agents, loading, 
+    updateLeadStatus, updateLeadAgent, deleteLead,
+    bulkUpdateStatus, bulkUpdateAgent, bulkDeleteLeads 
+  };
 }

@@ -10,7 +10,8 @@ import LeadsTable from './components/LeadsTable';
 import LeadProfilePage from './components/LeadProfile';
 import NotificationSystem from './components/NotificationSystem';
 import FileManager from './components/Files';
-import TeamManagement from './components/Team'; // <--- NEW IMPORT
+import TeamManagement from './components/Team'; 
+import ShufflePage from './components/Shuffle'; // <--- NEW IMPORT
 
 export default function App() {
   const [session, setSession] = useState<any>(null);
@@ -26,15 +27,15 @@ export default function App() {
   
   const [selectedLead, setSelectedLead] = useState<any>(null);
   
-  // --- UPDATED FILTER STATE (ARRAYS + LIMIT) ---
+  // --- FILTER STATE ---
   const [activeFilters, setActiveFilters] = useState({
       search: '',
       dateRange: 'all',
-      status: [] as string[],  // Array
-      agent: [] as string[],   // Array
-      source: [] as string[],  // Array
-      country: [] as string[], // Array
-      limit: 50,               // Number
+      status: [] as string[],
+      agent: [] as string[],
+      source: [] as string[],
+      country: [] as string[],
+      limit: 50,
       tab: 'all' as 'all' | 'mine' | 'unassigned'
   });
 
@@ -83,7 +84,7 @@ export default function App() {
   return (
     <div className="flex min-h-screen font-sans text-[#e2e8f0]">
       <NotificationSystem />
-      <Sidebar role="admin" username={session.user.email} activeView={currentView} onNavigate={handleNavigation} />
+      <Sidebar role={session.user.user_metadata?.role || 'admin'} username={session.user.email} activeView={currentView} onNavigate={handleNavigation} />
       
       <main className="flex-1 p-6 relative z-10 overflow-y-auto h-screen">
         
@@ -108,7 +109,7 @@ export default function App() {
             />
             
             <LeadsTable 
-                role="admin" 
+                role={session.user.user_metadata?.role || 'admin'} 
                 filters={activeFilters} 
                 onLeadClick={(lead) => setSelectedLead(lead)} 
                 currentUserEmail={session.user.email}
@@ -118,8 +119,10 @@ export default function App() {
 
         {currentView === 'files' && <FileManager />}
         
-        {/* --- REPLACED PLACEHOLDER WITH REAL COMPONENT --- */}
         {currentView === 'team' && <TeamManagement />} 
+
+        {/* --- ADDED SHUFFLE PAGE --- */}
+        {currentView === 'shuffle' && <ShufflePage />}
 
       </main>
     </div>

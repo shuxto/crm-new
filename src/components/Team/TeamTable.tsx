@@ -63,19 +63,23 @@ export default function TeamTable({ users, activeTab, allUsers, onDelete, onMana
                 </td>
                 <td className="p-5 text-right flex justify-end gap-2">
                   
-                  {/* --- ACTIONS (All have cursor-pointer now) --- */}
-                  {user.role === 'admin' && (
-                    user.is_trading_admin ? (
+                  {/* --- SMART SYNC BUTTON (Admin / Manager / Compliance) --- */}
+                  {['admin', 'manager', 'compliance'].includes(user.role) && (
+                    user.is_synced ? (
                         <div className="bg-blue-900/20 text-blue-400 border border-blue-500/30 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 cursor-default">
-                            <CheckCircle2 size={12} /> Linked
+                            <CheckCircle2 size={12} /> {user.role === 'admin' ? 'Linked' : 'Synced'}
                         </div>
                     ) : (
-                        <button onClick={() => onPromoteTrading?.(user)} className="bg-green-600/20 hover:bg-green-600 text-green-500 hover:text-white border border-green-600/50 px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer">
-                            <TrendingUp size={12} /> Sync Trading
+                        <button 
+                            onClick={() => onPromoteTrading?.(user)} 
+                            className="bg-green-600/20 hover:bg-green-600 text-green-500 hover:text-white border border-green-600/50 px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                        >
+                            <TrendingUp size={12} /> Sync Role
                         </button>
                     )
                   )}
 
+                  {/* --- ROLE SPECIFIC ACTIONS --- */}
                   {user.role === 'team_leader' && (
                     <button onClick={() => onManageLeader?.(user)} className="bg-cyan-600 hover:bg-cyan-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-lg shadow-cyan-900/20">
                         <Users size={12} /> Team

@@ -5,5 +5,5 @@ export interface CRMUser {
   role: 'admin' | 'manager' | 'team_leader' | 'conversion' | 'retention' | 'compliance';
   team_leader_id: string | null;
   allowed_sources: string | null;
-  is_trading_admin?: boolean; // <--- NEW FIELD
+  is_synced?: boolean; // <--- This tracks if they are synced in Trading Platform
 }

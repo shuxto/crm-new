@@ -43,17 +43,23 @@ export default function TeamManagement() {
   const fetchTeamData = async (silent = false) => {
     if (!silent) setLoading(true);
     
+    // 1. Get CRM Users
     const { data: crmData } = await supabase.from('crm_users').select('*').order('created_at', { ascending: false });
-    const { data: tradingAdmins } = await supabase.rpc('get_trading_admins');
-    const tradingAdminIds = new Set((tradingAdmins || []).map((u: any) => u.id));
+    
+    // 2. Get Trading Roles (RPC Call)
+    const { data: tradingRoles } = await supabase.rpc('get_trading_roles');
+    // Map: ID -> Role (e.g. "uuid-123" -> "manager")
+    const tradingRoleMap = new Map((tradingRoles || []).map((u: any) => [u.id, u.role]));
 
+    // 3. Get Folders
     const { data: folderData } = await supabase.from('crm_leads').select('source_file');
     const uniqueFolders = Array.from(new Set((folderData || []).map(f => f.source_file).filter(f => f && f !== ''))) as string[];
 
     if (crmData) {
         const mergedUsers = crmData.map((u: any) => ({
             ...u,
-            is_trading_admin: tradingAdminIds.has(u.id)
+            // Check if their CRM role matches exactly what is in the Trading Profile
+            is_synced: tradingRoleMap.get(u.id) === u.role 
         }));
         setUsers(mergedUsers as CRMUser[]);
     }
@@ -79,12 +85,16 @@ export default function TeamManagement() {
     });
   };
 
-  const handlePromoteClick = (user: CRMUser) => {
+  // NEW: GENERIC SYNC HANDLER (Admin, Manager, Compliance)
+  const handleSyncRoleClick = (user: CRMUser) => {
     setConfirmState({
-      isOpen: true, type: 'success', title: 'Promote to Trading Admin',
-      message: `Grant ${user.real_name} Admin access on the Trading Platform?`,
+      isOpen: true, type: 'success', title: `Sync ${user.role.toUpperCase()} Role?`,
+      message: `Update ${user.real_name}'s role in the Trading Platform to "${user.role}"?`,
       action: async () => {
-        const { error } = await supabase.rpc('make_trading_admin', { target_user_id: user.id });
+        const { error } = await supabase.rpc('sync_trading_role', { 
+            target_user_id: user.id,
+            target_role: user.role 
+        });
         if (error) throw error;
       }
     });
@@ -139,18 +149,15 @@ export default function TeamManagement() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <div className="md:col-span-2 glass-panel p-8 rounded-2xl relative overflow-hidden group flex flex-col justify-between min-h-60">
             
-            {/* BACKGROUND DECORATION (Pointer Events None fixes the click issue) */}
             <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition duration-500 pointer-events-none z-0">
                 <Crown size={180} />
             </div>
 
-            {/* TEXT CONTENT (z-10 ensures it's on top) */}
             <div className="relative z-10">
                 <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Team Command</h1>
                 <p className="text-gray-400 text-sm mb-6 max-w-md">Manage hierarchy, roles, and access permissions for the entire organization.</p>
             </div>
             
-            {/* ACTIONS ROW (Search + Button) */}
             <div className="relative z-10 flex gap-3 mt-auto items-center">
                  <div className="relative flex-1 group">
                     <Search className="absolute left-3 top-3 text-gray-500 group-focus-within:text-cyan-400 transition" size={18} />
@@ -189,7 +196,7 @@ export default function TeamManagement() {
         onDelete={handleDeleteClick} 
         onManageLeader={(leader) => setSelectedLeader(leader)}
         onManagePerms={(manager) => setSelectedManager(manager)}
-        onPromoteTrading={handlePromoteClick}
+        onPromoteTrading={handleSyncRoleClick} // <--- Pass the new handler
       />
 
       {/* MODALS */}

@@ -15,7 +15,7 @@ export default function Sidebar({ role = 'admin', username = 'User', activeView,
   
   // UPDATED STYLES & COLORS
   const styles: Record<UserRole, { color: string; label: string; bg: string }> = {
-    admin:       { color: 'text-blue-500',    label: 'Admin',      bg: 'bg-blue-600' },
+    admin:       { color: 'text-blue-500',    label: 'Admin',    bg: 'bg-blue-600' },
     manager:     { color: 'text-purple-500',  label: 'Manager',    bg: 'bg-purple-600' },
     team_leader: { color: 'text-cyan-500',    label: 'Team Lead',  bg: 'bg-cyan-600' },
     retention:   { color: 'text-fuchsia-500', label: 'Retention',  bg: 'bg-fuchsia-600' },

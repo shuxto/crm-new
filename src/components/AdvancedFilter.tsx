@@ -12,7 +12,6 @@ interface FilterState {
   limit: number;
 }
 
-// FIXED: Added currentUserEmail to the interface
 interface AdvancedFilterProps {
   currentFilters: any;
   onFilterChange: (filters: any) => void;
@@ -106,19 +105,51 @@ const MultiSelectDropdown = ({ label, icon: Icon, options, selected, onChange, w
 
 // --- MAIN COMPONENT ---
 export default function AdvancedFilter({ currentFilters, onFilterChange }: AdvancedFilterProps) {
+  // We need maps to convert ID <-> Name because DB uses IDs but Humans read Names
+  const [agentMap, setAgentMap] = useState<Record<string, string>>({}); // ID -> Name
+  const [nameToIdMap, setNameToIdMap] = useState<Record<string, string>>({}); // Name -> ID
+
   const [options, setOptions] = useState({
     sources: [] as string[],
     countries: [] as string[],
-    agents: [] as string[],
-    statuses: [] as string[] // Dynamic from DB
+    agents: [] as string[], // Now stores Names
+    statuses: [] as string[]
   });
 
   useEffect(() => {
     async function loadOptions() {
+      // 1. Fetch Sources
       const { data: sData } = await supabase.from('crm_leads').select('source_file');
+      
+      // 2. Fetch Countries
       const { data: cData } = await supabase.from('crm_leads').select('country');
-      const { data: aData } = await supabase.from('crm_leads').select('assigned_to');
-      // Fetch Status Labels from our new table
+      
+      // 3. Fetch Agents (USERS) - FILTERED BY ROLE
+      // Only get Conversion, Retention, and Team Leaders
+      const { data: uData } = await supabase
+        .from('crm_users')
+        .select('id, real_name')
+        .in('role', ['conversion', 'retention', 'team_leader']) // <--- THE FIX
+        .order('real_name');
+      
+      // Build Agent Maps
+      const agNames: string[] = [];
+      const idMap: Record<string, string> = {};
+      const revMap: Record<string, string> = {};
+      
+      if (uData) {
+        uData.forEach(u => {
+            if(u.real_name) {
+                agNames.push(u.real_name);
+                idMap[u.id] = u.real_name;
+                revMap[u.real_name] = u.id;
+            }
+        });
+      }
+      setAgentMap(idMap);
+      setNameToIdMap(revMap);
+
+      // 4. Fetch Statuses
       const { data: stData } = await supabase
         .from('crm_statuses')
         .select('label')
@@ -128,7 +159,7 @@ export default function AdvancedFilter({ currentFilters, onFilterChange }: Advan
       setOptions({
         sources: Array.from(new Set(sData?.map(x => x.source_file).filter(Boolean))) as string[],
         countries: Array.from(new Set(cData?.map(x => x.country).filter(Boolean))) as string[],
-        agents: Array.from(new Set(aData?.map(x => x.assigned_to).filter(Boolean))) as string[],
+        agents: agNames,
         statuses: stData?.map(x => x.label) || []
       });
     }
@@ -138,6 +169,12 @@ export default function AdvancedFilter({ currentFilters, onFilterChange }: Advan
   const updateFilter = (key: keyof FilterState, value: any) => {
     const newFilters = { ...currentFilters, [key]: value };
     onFilterChange(newFilters);
+  };
+
+  // Special handler for Agent changes (Convert Names back to IDs)
+  const handleAgentChange = (selectedNames: string[]) => {
+      const selectedIds = selectedNames.map(name => nameToIdMap[name]).filter(Boolean);
+      updateFilter('agent', selectedIds);
   };
 
   const resetFilters = () => {
@@ -150,6 +187,9 @@ export default function AdvancedFilter({ currentFilters, onFilterChange }: Advan
       limit: 50
     });
   };
+
+  // Convert currently selected IDs to Names for the dropdown display
+  const selectedAgentNames = (currentFilters.agent || []).map((id: string) => agentMap[id]).filter(Boolean);
 
   return (
     <div className="glass-panel p-5 rounded-xl mb-6 shadow-xl relative z-40 animate-in slide-in-from-top-4">
@@ -191,13 +231,13 @@ export default function AdvancedFilter({ currentFilters, onFilterChange }: Advan
           width="w-40"
         />
 
-        {/* 4. AGENTS */}
+        {/* 4. AGENTS (FIXED & FILTERED) */}
         <MultiSelectDropdown 
           label="Agents" 
           icon={Users} 
           options={options.agents} 
-          selected={currentFilters.agent || []} 
-          onChange={(val: string[]) => updateFilter('agent', val)} 
+          selected={selectedAgentNames} // Passing Names
+          onChange={handleAgentChange}  // Receiving Names -> Converting to IDs
         />
 
         {/* 5. STATUS (Dynamic) */}

@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
-// --- TYPES ---
 export interface Lead {
   id: string; 
   name: string;
@@ -34,21 +33,17 @@ export function useLeads(filters: any, currentUserEmail?: string) {
   const fetchData = async () => {
     setLoading(true);
 
-    // 1. Fetch Statuses
     const { data: stData } = await supabase.from('crm_statuses').select('label, hex_color').eq('is_active', true).order('order_index', { ascending: true });
     if (stData) setStatusOptions(stData);
 
-    // 2. Fetch Agents
     const { data: agentData } = await supabase.from('crm_users').select('id, real_name, role').in('role', ['conversion', 'retention', 'team_leader']).order('real_name', { ascending: true });
     if (agentData) setAgents(agentData);
 
-    // 3. Fetch Leads with COUNT
     let query = supabase.from('crm_leads')
         .select('*', { count: 'exact' }) 
         .order('created_at', { ascending: false })
         .order('id', { ascending: false });
 
-    // --- APPLY FILTERS ---
     if (filters) {
         if (filters.status?.length > 0) query = query.in('status', filters.status);
         if (filters.search?.trim()) {
@@ -75,7 +70,6 @@ export function useLeads(filters: any, currentUserEmail?: string) {
         else if (filters.tab === 'mine' && currentUserEmail) query = query.ilike('assigned_to', `%${currentUserEmail}%`); 
     }
 
-    // --- PAGINATION LOGIC ---
     const page = filters?.page || 1;
     const limit = filters?.limit || 50;
     const from = (page - 1) * limit;
@@ -92,7 +86,6 @@ export function useLeads(filters: any, currentUserEmail?: string) {
     setLoading(false);
   };
 
-  // --- REALTIME ---
   useEffect(() => {
     fetchData();
     const leadSub = supabase.channel('table-leads')
@@ -109,7 +102,12 @@ export function useLeads(filters: any, currentUserEmail?: string) {
     return () => { supabase.removeChannel(leadSub); };
   }, [filters]);
 
-  // --- SINGLE ACTIONS ---
+  // --- ACTIONS ---
+
+  // NEW: Helper to update local state instantly (For Notes Icon)
+  const updateLocalLead = (id: string, updates: Partial<Lead>) => {
+    setLeads(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l));
+  };
 
   const updateLeadStatus = async (leadId: string, newStatus: string) => {
     const lead = leads.find(l => l.id === leadId);
@@ -122,7 +120,6 @@ export function useLeads(filters: any, currentUserEmail?: string) {
     }
 
     const { error } = await supabase.from('crm_leads').update({ status: newStatus }).eq('id', leadId);
-    
     if (error) console.error("Status Update Failed", error);
     else window.dispatchEvent(new CustomEvent('crm-toast', { detail: { message: `Status updated`, type: 'success' } }));
   };
@@ -146,25 +143,16 @@ export function useLeads(filters: any, currentUserEmail?: string) {
     return true;
   };
 
-  // --- BULK ACTIONS ---
-
   const bulkUpdateStatus = async (ids: string[], status: string) => {
     setLeads(prev => prev.map(l => ids.includes(l.id) ? { ...l, status } : l));
     const { error } = await supabase.from('crm_leads').update({ status }).in('id', ids);
-    if (error) {
-        console.error("Bulk Status Failed", error);
-        return false;
-    }
+    if (error) return false;
     return true;
   };
 
-  // MODIFIED: Accepts 'string | null' now
   const bulkUpdateAgent = async (ids: string[], agentId: string | null) => {
     setLeads(prev => prev.map(l => ids.includes(l.id) ? { ...l, assigned_to: agentId } : l));
-    
-    // Supabase handles 'null' correctly for assigned_to
     const { error } = await supabase.from('crm_leads').update({ assigned_to: agentId }).in('id', ids);
-    
     if (error) return false;
     return true;
   };
@@ -172,7 +160,6 @@ export function useLeads(filters: any, currentUserEmail?: string) {
   const bulkDeleteLeads = async (ids: string[]) => {
     const { error } = await supabase.from('crm_leads').delete().in('id', ids);
     if (error) return false;
-    
     setLeads(prev => prev.filter(l => !ids.includes(l.id)));
     setTotalCount(prev => prev - ids.length);
     return true;
@@ -181,6 +168,7 @@ export function useLeads(filters: any, currentUserEmail?: string) {
   return { 
     leads, totalCount, statusOptions, agents, loading, 
     updateLeadStatus, updateLeadAgent, deleteLead,
-    bulkUpdateStatus, bulkUpdateAgent, bulkDeleteLeads 
+    bulkUpdateStatus, bulkUpdateAgent, bulkDeleteLeads,
+    updateLocalLead // <--- EXPORTED THIS
   };
 }

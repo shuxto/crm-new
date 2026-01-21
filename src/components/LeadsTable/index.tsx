@@ -10,6 +10,7 @@ import StatusCell from './StatusCell';
 import AssignAgentCell from './AssignAgentCell'; 
 import KYCModal from './KYCModal'; 
 import ConfirmationModal from '../Team/ConfirmationModal';
+import NotesSidebar from './NotesSidebar'; 
 
 interface LeadsTableProps {
   role?: 'admin' | 'manager' | 'team_leader' | 'conversion' | 'retention' | 'compliance';
@@ -23,18 +24,16 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
   const { 
     leads, totalCount, statusOptions, agents, loading, 
     updateLeadStatus, updateLeadAgent, deleteLead,
-    bulkUpdateStatus, bulkUpdateAgent, bulkDeleteLeads 
+    bulkUpdateStatus, bulkUpdateAgent, bulkDeleteLeads,
+    updateLocalLead // <--- We use this to color the icon instantly
   } = useLeads(filters, currentUserEmail);
   
   // STATE
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [kycLead, setKycLead] = useState<Lead | null>(null);
-
-  // --- DELETE STATE (Single) ---
+  const [activeNoteLead, setActiveNoteLead] = useState<Lead | null>(null);
   const [leadToDelete, setLeadToDelete] = useState<Lead | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-
-  // --- BULK ACTION STATE ---
   const [actionMode, setActionMode] = useState<'none' | 'assign' | 'status'>('none');
   const [isProcessing, setIsProcessing] = useState(false);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
@@ -52,16 +51,13 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
   const showAssign = isAdmin || isManager;
   const showDelete = isAdmin || isManager;
 
-  // Pagination Logic
   const currentPage = filters?.page || 1;
   const limit = filters?.limit || 50;
   const totalPages = Math.ceil((totalCount || 0) / limit);
 
-  // Selection Logic
   const toggleSelectAll = () => selectedIds.length === leads.length ? setSelectedIds([]) : setSelectedIds(leads.map(l => l.id));
   const toggleSelectOne = (id: string) => selectedIds.includes(id) ? setSelectedIds(selectedIds.filter(i => i !== id)) : setSelectedIds([...selectedIds, id]);
 
-  // --- HANDLERS (Single) ---
   const handleDeleteClick = (lead: Lead) => setLeadToDelete(lead);
 
   const confirmDelete = async () => {
@@ -72,15 +68,10 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
     setLeadToDelete(null); 
   };
 
-  // --- HANDLERS (Bulk) ---
-
   const handleBulkAssign = async (agentId: string | null) => {
     setIsProcessing(true);
     await bulkUpdateAgent(selectedIds, agentId);
-    
-    // Smart Notification Message
     const msg = agentId ? `Assigned ${selectedIds.length} leads` : `Unassigned ${selectedIds.length} leads`;
-
     window.dispatchEvent(new CustomEvent('crm-toast', { detail: { message: msg, type: 'success' } }));
     setIsProcessing(false);
     setActionMode('none');
@@ -116,6 +107,16 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  // INSTANT ICON UPDATE
+  const handleNoteCountChange = (newCount: number) => {
+      if (activeNoteLead) {
+          // Update Sidebar Prop State
+          setActiveNoteLead({ ...activeNoteLead, note_count: newCount });
+          // Update Table State Instantly
+          updateLocalLead(activeNoteLead.id, { note_count: newCount });
+      }
   };
 
   if (loading && leads.length === 0) return <div className="glass-panel rounded-xl p-12 flex justify-center items-center"><Loader2 className="animate-spin text-blue-500" size={32} /></div>;
@@ -158,7 +159,17 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
                 </td>
                 <td className="p-4 align-middle"><StatusCell currentStatus={lead.status} leadId={lead.id} options={statusOptions} onUpdate={updateLeadStatus} rowIndex={index} totalRows={leads.length} /></td>
                 {showAssign && <td className="p-4 hidden md:table-cell"><AssignAgentCell leadId={lead.id} currentAgentId={lead.assigned_to} agents={agents} onUpdate={updateLeadAgent} rowIndex={index} totalRows={leads.length} /></td>}
-                <td className="p-4 text-center"><button className={`transition p-2 rounded-lg hover:bg-white/5 ${(lead.note_count || 0) > 0 ? 'text-blue-400' : 'text-gray-600'}`}><MessageSquare size={16} /></button></td>
+                
+                {/* NOTES BUTTON (Instant Update Color) */}
+                <td className="p-4 text-center">
+                    <button 
+                        onClick={() => setActiveNoteLead(lead)}
+                        className={`transition p-2 rounded-lg hover:bg-white/5 ${(lead.note_count || 0) > 0 ? 'text-blue-400 drop-shadow-[0_0_8px_rgba(96,165,250,0.5)]' : 'text-gray-600'}`}
+                    >
+                        <MessageSquare size={16} />
+                    </button>
+                </td>
+
                 <td className="p-4 text-center"><button onClick={() => onLeadClick(lead)} className="p-1.5 bg-blue-600/10 text-blue-400 border border-blue-500/30 hover:bg-blue-600 hover:text-white rounded-lg transition-all shadow-lg shadow-blue-500/10"><Eye size={14} /></button></td>
                 {showDelete && <td className="p-4 text-center"><button onClick={() => handleDeleteClick(lead)} className="text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition p-1.5 rounded-lg"><Trash2 size={14} /></button></td>}
               </tr>
@@ -177,7 +188,6 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
       </div>
 
       {selectedIds.length > 0 && createPortal(
-        // FIXED Z-INDEX (Removed brackets)
         <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-9999 animate-in slide-in-from-bottom-20 fade-in duration-500 ease-out">
            <div className="glass-panel border border-cyan-500/30 bg-[#020617]/90 backdrop-blur-xl rounded-2xl shadow-[0_0_20px_rgba(34,211,238,0.2)] p-2 flex items-center gap-2 ring-1 ring-white/10 transform transition-all hover:scale-105">
               
@@ -192,19 +202,16 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
                 <div className="relative group">
                     <button 
                         onClick={() => setActionMode(actionMode === 'assign' ? 'none' : 'assign')}
-                        disabled={isProcessing} // FIXED: Added disabled
+                        disabled={isProcessing}
                         className={`p-3 rounded-xl transition flex items-center gap-2 font-bold text-sm ${actionMode === 'assign' ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-500/20' : 'hover:bg-white/5 text-gray-300 hover:text-white'}`}
                     >
                         <Users size={18} /> Assign
                     </button>
 
                     {actionMode === 'assign' && (
-                        // FIXED: Changed bg-[#0f172a] to bg-crm-bg
                         <div className="absolute bottom-full left-0 mb-4 w-64 bg-crm-bg border border-white/10 rounded-xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-2 zoom-in-95">
                             <div className="p-2 bg-black/20 text-[10px] uppercase font-bold text-gray-500 tracking-wider">Select Agent</div>
                             <div className="max-h-60 overflow-y-auto custom-scrollbar p-1">
-                                
-                                {/* UNASSIGN BUTTON */}
                                 <button 
                                     onClick={() => handleBulkAssign(null)}
                                     className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300 rounded-lg transition flex items-center gap-2 mb-2 border-b border-white/5 pb-2"
@@ -212,7 +219,6 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
                                     <UserMinus size={14} />
                                     Unassign (Release)
                                 </button>
-
                                 {agents.map(agent => (
                                     <button 
                                         key={agent.id}
@@ -232,14 +238,13 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
               <div className="relative group">
                     <button 
                         onClick={() => setActionMode(actionMode === 'status' ? 'none' : 'status')}
-                        disabled={isProcessing} // FIXED: Added disabled
+                        disabled={isProcessing}
                         className={`p-3 rounded-xl transition flex items-center gap-2 font-bold text-sm ${actionMode === 'status' ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/20' : 'hover:bg-white/5 text-gray-300 hover:text-white'}`}
                     >
                         <RefreshCw size={18} /> Status
                     </button>
 
                      {actionMode === 'status' && (
-                        // FIXED: Changed bg-[#0f172a] to bg-crm-bg
                         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-4 w-56 bg-crm-bg border border-white/10 rounded-xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-2 zoom-in-95">
                             <div className="p-2 bg-black/20 text-[10px] uppercase font-bold text-gray-500 tracking-wider">Select Status</div>
                             <div className="p-1">
@@ -260,7 +265,7 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
 
               <button 
                 onClick={handleBulkDownload}
-                disabled={isProcessing} // FIXED: Added disabled
+                disabled={isProcessing}
                 className="p-3 rounded-xl hover:bg-white/5 text-gray-300 hover:text-white transition flex items-center gap-2 font-bold text-sm"
               >
                   <Download size={18} /> CSV
@@ -269,7 +274,7 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
               {showDelete && (
                   <button 
                     onClick={() => setShowBulkDeleteConfirm(true)}
-                    disabled={isProcessing} // FIXED: Added disabled
+                    disabled={isProcessing}
                     className="p-3 rounded-xl hover:bg-red-500/10 text-gray-300 hover:text-red-400 transition flex items-center gap-2 font-bold text-sm"
                   >
                       <Trash2 size={18} />
@@ -280,7 +285,7 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
               
               <button 
                 onClick={() => setSelectedIds([])}
-                disabled={isProcessing} // FIXED: Added disabled
+                disabled={isProcessing}
                 className="p-3 rounded-xl hover:bg-white/10 text-gray-400 hover:text-white transition"
               >
                   <X size={18} />
@@ -292,6 +297,17 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
 
       {kycLead && (
         <KYCModal leadId={kycLead.id} leadName={`${kycLead.name} ${kycLead.surname}`} phone={kycLead.phone} email={kycLead.email} currentStatus={kycLead.kyc_status} onClose={() => setKycLead(null)} onUpdateStatus={updateKycStatus} />
+      )}
+
+      {/* --- NOTES SIDEBAR (Slides In Smoothly) --- */}
+      {activeNoteLead && (
+        <NotesSidebar 
+            lead={activeNoteLead} 
+            onClose={() => setActiveNoteLead(null)} 
+            currentUserEmail={currentUserEmail}
+            role={role}
+            onNoteCountChange={handleNoteCountChange}
+        />
       )}
 
       <ConfirmationModal isOpen={!!leadToDelete} type="danger" title="Delete Lead?" message={`Are you sure you want to delete ${leadToDelete?.name} ${leadToDelete?.surname}?`} onConfirm={confirmDelete} onClose={() => setLeadToDelete(null)} loading={isDeleting} />

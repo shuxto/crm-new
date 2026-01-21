@@ -10,6 +10,7 @@ import LeadsTable from './components/LeadsTable';
 import LeadProfilePage from './components/LeadProfile';
 import NotificationSystem from './components/NotificationSystem';
 import FileManager from './components/Files';
+import TeamManagement from './components/Team'; // <--- NEW IMPORT
 
 export default function App() {
   const [session, setSession] = useState<any>(null);
@@ -116,7 +117,9 @@ export default function App() {
         )}
 
         {currentView === 'files' && <FileManager />}
-        {currentView === 'team' && <div className="flex items-center justify-center h-[80vh] text-gray-500 italic">Team Management Module Coming Soon...</div>}
+        
+        {/* --- REPLACED PLACEHOLDER WITH REAL COMPONENT --- */}
+        {currentView === 'team' && <TeamManagement />} 
 
       </main>
     </div>

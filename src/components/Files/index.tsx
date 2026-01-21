@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import Papa from 'papaparse';
+import * as XLSX from 'xlsx'; // <--- NEW: Import Excel Engine
 import { FileSpreadsheet, UploadCloud, Search, Trash2, Download, CheckCircle, Loader2, FolderOpen } from 'lucide-react';
 
 // --- TYPES ---
@@ -13,7 +14,9 @@ interface FolderStat {
 
 // --- HELPER: STRICT HEADER VALIDATION ---
 const validateHeaders = (headers: string[]) => {
-  const normalized = headers.map(h => h.toLowerCase().trim().replace(/[\uFEFF\x00-\x1F]/g, '')); // Remove invisible chars
+  if (!headers || headers.length === 0) return false;
+  
+  const normalized = headers.map(h => String(h).toLowerCase().trim().replace(/[\uFEFF\x00-\x1F]/g, '')); // Remove invisible chars
   
   const required4 = ['name', 'email', 'phone', 'country'];
   const required5 = ['name', 'surname', 'email', 'phone', 'country'];
@@ -25,6 +28,52 @@ const validateHeaders = (headers: string[]) => {
   if (has5) return 'type_5'; // Separate Surname
   if (has4) return 'type_4'; // Combined Name
   return false;
+};
+
+// --- HELPER: UNIVERSAL FILE PARSER (CSV + EXCEL) ---
+const parseFile = (file: File): Promise<{ data: any[], fields: string[] }> => {
+  return new Promise((resolve, reject) => {
+    // A. CSV HANDLING (PapaParse)
+    if (file.name.endsWith('.csv')) {
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          resolve({
+            data: results.data as any[],
+            fields: results.meta.fields || []
+          });
+        },
+        error: (err) => reject(err)
+      });
+      return;
+    }
+
+    // B. EXCEL HANDLING (SheetJS)
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = e.target?.result;
+        const workbook = XLSX.read(data, { type: 'binary' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+
+        // 1. Get Headers (First Row)
+        const headerRow = XLSX.utils.sheet_to_json(worksheet, { header: 1 })[0] as string[];
+        
+        // 2. Get Data (Rows as Objects)
+        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+        resolve({
+          data: jsonData,
+          fields: headerRow || []
+        });
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.readAsBinaryString(file);
+  });
 };
 
 export default function FileManager() {
@@ -45,11 +94,9 @@ export default function FileManager() {
     setLoading(true);
     setCheckResults(null);
 
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: async (results) => {
-        const rows = results.data as any[];
+    try {
+        const { data: rows } = await parseFile(file); // <--- Using Universal Parser
+        
         let dupes = 0;
         let newLeads = 0;
         let dupeList: any[] = [];
@@ -60,8 +107,8 @@ export default function FileManager() {
         const existingEmails = new Set(dbLeads?.map(l => l.email) || []);
 
         rows.forEach((row: any, index) => {
-          const phone = row.phone ? row.phone.replace(/[^0-9]/g, '') : '';
-          const email = row.email ? row.email.trim() : '';
+          const phone = row.phone ? String(row.phone).replace(/[^0-9]/g, '') : ''; // Ensure String
+          const email = row.email ? String(row.email).trim() : '';
           
           let isDupe = false;
           let reason = '';
@@ -78,9 +125,12 @@ export default function FileManager() {
         });
 
         setCheckResults({ total: rows.length, new: newLeads, dupes, dupeList });
+    } catch (error) {
+        alert("Error parsing file. Make sure it is a valid CSV or Excel file.");
+        console.error(error);
+    } finally {
         setLoading(false);
-      }
-    });
+    }
   };
 
   // --- 2. UPLOAD TAB LOGIC (STRICT) ---
@@ -89,12 +139,8 @@ export default function FileManager() {
     setLoading(true);
     setStatusMsg('Analyzing Headers...');
     
-    // Parse First to Check Headers
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: async (results) => {
-        const headers = results.meta.fields || [];
+    try {
+        const { data: rows, fields: headers } = await parseFile(file); // <--- Using Universal Parser
         const csvType = validateHeaders(headers);
 
         if (!csvType) {
@@ -104,8 +150,8 @@ export default function FileManager() {
         }
 
         setStatusMsg('Headers OK. Importing data...');
-        const rows = results.data as any[];
-        const sourceFile = file.name.replace('.csv', '');
+        // Remove both extensions for cleaner folder name
+        const sourceFile = file.name.replace('.csv', '').replace('.xlsx', '').replace('.xls', '');
         
         // Fetch existing phones for duplicates check
         const { data: dbLeads } = await supabase.from('crm_leads').select('phone');
@@ -116,7 +162,7 @@ export default function FileManager() {
         let skippedCount = 0;
 
         for (const row of rows) {
-          const phone = row.phone ? row.phone.replace(/[^0-9]/g, '') : '';
+          const phone = row.phone ? String(row.phone).replace(/[^0-9]/g, '') : '';
           
           // Duplicate Check
           if (phone && existingPhones.has(phone)) {
@@ -133,7 +179,7 @@ export default function FileManager() {
             surname = row.surname || '';
           } else {
             // Type 4: Split Name
-            const parts = (row.name || '').split(' ');
+            const parts = (String(row.name || '')).split(' ');
             name = parts[0];
             surname = parts.slice(1).join(' ');
           }
@@ -154,6 +200,8 @@ export default function FileManager() {
 
         // BATCH INSERT
         if (batchInsert.length > 0) {
+          // Note: Supabase limits strict batch sizes, but for <5000 rows usually OK. 
+          // For HUGE files, we might need to chunk this loop.
           const { error } = await supabase.from('crm_leads').insert(batchInsert);
           if (error) {
             alert('Database Error: ' + error.message);
@@ -163,10 +211,12 @@ export default function FileManager() {
         } else {
             setUploadResults({ added: 0, skipped: skippedCount });
         }
-        
+    } catch (error) {
+        alert("Error importing file.");
+        console.error(error);
+    } finally {
         setLoading(false);
-      }
-    });
+    }
   };
 
   // --- 3. MANAGE TAB LOGIC (STATS) ---
@@ -221,7 +271,6 @@ export default function FileManager() {
       
       {/* HEADER */}
       <div className="flex items-center gap-4 mb-8">
-        {/* FIXED: bg-linear-to-br instead of bg-gradient-to-br */}
         <div className="w-14 h-14 bg-linear-to-br from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/20 border border-white/10">
           <FolderOpen className="text-white" size={28} />
         </div>
@@ -234,14 +283,13 @@ export default function FileManager() {
       {/* TABS */}
       <div className="flex border-b border-gray-700 mb-8 overflow-x-auto">
         {[
-            { id: 'check', label: 'Check CSV', icon: Search },
-            { id: 'upload', label: 'Upload CSV', icon: UploadCloud },
+            { id: 'check', label: 'Check File', icon: Search },
+            { id: 'upload', label: 'Upload File', icon: UploadCloud },
             { id: 'manage', label: 'Manage Files', icon: FileSpreadsheet }
         ].map(tab => (
             <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                // FIXED: min-w-35 instead of min-w-[140px]
                 className={`flex-1 md:flex-none px-8 py-4 font-bold text-sm transition rounded-t-xl flex items-center justify-center gap-2 min-w-35 ${
                     activeTab === tab.id 
                     ? 'border-b-2 border-blue-500 text-blue-500 bg-blue-500/10' 
@@ -257,18 +305,18 @@ export default function FileManager() {
       {activeTab === 'check' && (
         <div className="glass-panel p-8 rounded-2xl shadow-2xl animate-in fade-in slide-in-from-bottom-4">
             <h2 className="text-xl font-bold text-white mb-2">Flexible Check</h2>
-            <p className="text-gray-400 text-sm mb-6">Scan any CSV file for duplicates. It only looks for <b>Phone</b> or <b>Email</b> columns.</p>
+            <p className="text-gray-400 text-sm mb-6">Scan any CSV or Excel file for duplicates. It only looks for <b>Phone</b> or <b>Email</b> columns.</p>
             
             {!checkResults ? (
-                 // FIXED: bg-crm-bg/30 instead of bg-[#0f172a]/30
                  <div className="border-2 border-dashed border-gray-600 hover:border-blue-500 hover:bg-blue-500/5 rounded-2xl p-12 text-center transition cursor-pointer group bg-crm-bg/30">
-                    <input type="file" accept=".csv" onChange={(e) => setFile(e.target.files?.[0] || null)} className="hidden" id="checkInput" />
+                    {/* ACCEPT CSV AND EXCEL */}
+                    <input type="file" accept=".csv, .xlsx, .xls" onChange={(e) => setFile(e.target.files?.[0] || null)} className="hidden" id="checkInput" />
                     <label htmlFor="checkInput" className="cursor-pointer block w-full h-full">
                         <div className="w-16 h-16 bg-gray-700/50 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:bg-blue-500/20 transition">
                             <FileSpreadsheet className="text-gray-400 group-hover:text-blue-400" size={32} />
                         </div>
                         <p className="text-lg text-gray-300 font-bold group-hover:text-white">
-                            {file ? file.name : 'Select CSV to Analyze'}
+                            {file ? file.name : 'Select CSV or Excel to Analyze'}
                         </p>
                     </label>
                     {file && (
@@ -280,14 +328,13 @@ export default function FileManager() {
                  </div>
             ) : (
                 <div className="animate-in zoom-in-95 duration-300">
-                     <div className="grid grid-cols-3 gap-6 mb-8">
+                      <div className="grid grid-cols-3 gap-6 mb-8">
                         <div className="bg-[#1e293b] p-5 rounded-xl border border-white/10 text-center"><span className="block text-3xl font-bold text-white">{checkResults.total}</span><span className="text-[10px] text-gray-400 uppercase font-bold">Total</span></div>
                         <div className="bg-[#1e293b] p-5 rounded-xl border border-green-500/20 text-center"><span className="block text-3xl font-bold text-green-400">{checkResults.new}</span><span className="text-[10px] text-green-400/70 uppercase font-bold">New</span></div>
                         <div className="bg-[#1e293b] p-5 rounded-xl border border-red-500/20 text-center"><span className="block text-3xl font-bold text-red-400">{checkResults.dupes}</span><span className="text-[10px] text-red-400/70 uppercase font-bold">Dupes</span></div>
                     </div>
                     
                     {checkResults.dupeList.length > 0 ? (
-                        // FIXED: bg-crm-bg instead of bg-[#0f172a]
                         <div className="bg-crm-bg rounded-xl border border-red-500/20 overflow-hidden max-h-60 overflow-y-auto">
                            <table className="w-full text-left text-xs text-gray-400">
                                <thead className="bg-red-500/10 text-red-300 font-bold sticky top-0"><tr><th className="p-3">Row</th><th className="p-3">Name</th><th className="p-3">Reason</th></tr></thead>
@@ -315,7 +362,6 @@ export default function FileManager() {
                     <h2 className="text-xl font-bold text-white mb-2">Strict Import</h2>
                     <p className="text-gray-400 text-sm">Upload to Database. Must have: <code className="bg-black/30 px-1 py-0.5 rounded text-blue-300">Name, Phone, Email, Country</code></p>
                  </div>
-                 {/* RULES VISUAL */}
                  <div className="hidden md:block bg-blue-500/10 border border-blue-500/20 px-4 py-2 rounded-lg text-xs text-blue-200">
                      <p>Option 1: Name, Email, Phone, Country</p>
                      <p>Option 2: Name, Surname, Email, Phone, Country</p>
@@ -323,15 +369,15 @@ export default function FileManager() {
              </div>
 
              {!uploadResults ? (
-                 // FIXED: bg-crm-bg/30 instead of bg-[#0f172a]/30
                  <div className="border-2 border-dashed border-gray-600 hover:border-green-500 hover:bg-green-500/5 rounded-2xl p-12 text-center transition cursor-pointer group bg-crm-bg/30">
-                    <input type="file" accept=".csv" onChange={(e) => setFile(e.target.files?.[0] || null)} className="hidden" id="uploadInput" />
+                    {/* ACCEPT CSV AND EXCEL */}
+                    <input type="file" accept=".csv, .xlsx, .xls" onChange={(e) => setFile(e.target.files?.[0] || null)} className="hidden" id="uploadInput" />
                     <label htmlFor="uploadInput" className="cursor-pointer block w-full h-full">
                         <div className="w-16 h-16 bg-gray-700/50 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:bg-green-500/20 transition">
                             <UploadCloud className="text-gray-400 group-hover:text-green-400" size={32} />
                         </div>
                         <p className="text-lg text-gray-300 font-bold group-hover:text-white">
-                            {file ? file.name : 'Select CSV to Upload'}
+                            {file ? file.name : 'Select CSV or Excel to Upload'}
                         </p>
                     </label>
                     {file && (
@@ -345,7 +391,6 @@ export default function FileManager() {
                     )}
                  </div>
              ) : (
-                // FIXED: bg-crm-bg instead of bg-[#0f172a]
                 <div className="bg-crm-bg p-6 rounded-xl border border-green-500/30 text-center animate-in zoom-in-95">
                     <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4 text-green-400"><CheckCircle size={32} /></div>
                     <h3 className="text-2xl font-bold text-white mb-4">Import Success!</h3>

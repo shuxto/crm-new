@@ -24,7 +24,8 @@ interface StatusDefinition {
 }
 
 interface LeadsTableProps {
-  role?: 'admin' | 'moderator' | 'agent' | 'retention';
+  // UPDATED ROLES HERE
+  role?: 'admin' | 'manager' | 'team_leader' | 'conversion' | 'retention' | 'compliance';
   filters?: any;
   onLeadClick: (lead: Lead) => void;
   currentUserEmail?: string;
@@ -186,10 +187,12 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
     }
   };
 
+  // --- RENDER HELPERS (UPDATED) ---
   const isAdmin = role === 'admin';
-  const isMod = role === 'moderator';
-  const showCheckbox = isAdmin || isMod;
-  const showAssign = isAdmin || isMod;
+  const isManager = role === 'manager'; // CHANGED from isMod
+  
+  const showCheckbox = isAdmin || isManager;
+  const showAssign = isAdmin || isManager;
   const showDelete = isAdmin;
   
   const toggleSelectAll = () => {

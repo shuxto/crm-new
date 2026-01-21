@@ -1,17 +1,19 @@
 import { PieChart, Users, FolderOpen, Headset, Shuffle, Share2, Power, LayoutGrid, ShieldAlert } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
+// UPDATED ROLES
 type UserRole = 'admin' | 'manager' | 'team_leader' | 'retention' | 'conversion' | 'compliance';
 
 interface SidebarProps {
   role?: UserRole;
   username?: string;
-  activeView: string;             // To highlight the correct button
-  onNavigate: (view: string) => void; // To change the page
+  activeView: string;
+  onNavigate: (view: string) => void;
 }
 
 export default function Sidebar({ role = 'admin', username = 'User', activeView, onNavigate }: SidebarProps) {
   
+  // UPDATED STYLES & COLORS
   const styles: Record<UserRole, { color: string; label: string; bg: string }> = {
     admin:       { color: 'text-blue-500',    label: 'Admin',      bg: 'bg-blue-600' },
     manager:     { color: 'text-purple-500',  label: 'Manager',    bg: 'bg-purple-600' },
@@ -25,12 +27,13 @@ export default function Sidebar({ role = 'admin', username = 'User', activeView,
 
   const menuItems = [
     { id: 'dashboard', name: 'Dashboard', icon: PieChart }, 
-    { id: 'team',      name: 'Team',      icon: Users,       allowed: ['admin', 'manager', 'team_leader', 'compliance'] },
-    // FILES: Only Admin & Manager
+    { id: 'team',      name: 'Team',      icon: Users,       allowed: ['admin', 'manager', 'team_leader'] },
+    // Only Admin & Manager can see Files
     { id: 'files',     name: 'Files',     icon: FolderOpen,  allowed: ['admin', 'manager'] }, 
     { id: 'calls',     name: 'Calls',     icon: Headset },
     { id: 'shuffle',   name: 'Shuffle',   icon: Shuffle,     allowed: ['admin', 'manager', 'team_leader'] },
     { id: 'splitter',  name: 'Splitter',  icon: Share2,      allowed: ['admin', 'manager'] },
+    // Compliance & Admin only
     { id: 'compliance', name: 'KYC Center', icon: ShieldAlert, allowed: ['admin', 'compliance', 'manager'] }
   ];
 
@@ -49,16 +52,16 @@ export default function Sidebar({ role = 'admin', username = 'User', activeView,
       {/* NAV */}
       <nav className="flex-1 space-y-1">
         {menuItems.map((link) => {
+          // @ts-ignore - Allow loose role matching
           const isVisible = role === 'admin' || !link.allowed || link.allowed.includes(role);
           if (!isVisible) return null;
 
-          // Is this the button we are currently looking at?
           const isActive = activeView === link.id;
 
           return (
             <button 
               key={link.id} 
-              onClick={() => onNavigate(link.id)} // CLICK HANDLER
+              onClick={() => onNavigate(link.id)}
               className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[11px] font-bold transition-all ${isActive ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
             >
               <link.icon size={14} /> {link.name}
@@ -69,7 +72,6 @@ export default function Sidebar({ role = 'admin', username = 'User', activeView,
 
       {/* FOOTER */}
       <div className="mt-auto pt-4 border-t border-white/5 space-y-4">
-        
         <div className="bg-black/20 rounded-xl p-3 border border-white/5 text-center">
           <span className={`text-[8px] font-bold uppercase tracking-widest ${currentStyle.color}`}>{role}</span>
           <p className="text-[10px] font-bold text-white truncate">{username}</p>

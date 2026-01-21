@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { 
-  Shuffle, Shield, Lock, Users, AlertTriangle, CheckCircle2, Loader2, ArrowRight
+  Shuffle, Lock, Users, AlertTriangle, CheckCircle2, Loader2, ArrowRight
 } from 'lucide-react';
 import ConfirmationModal from '../Team/ConfirmationModal';
 import SuccessModal from '../Team/SuccessModal';
@@ -103,7 +103,7 @@ export default function ShufflePage() {
                 </p>
             </div>
 
-            <label className="flex items-center gap-3 px-5 py-3 rounded-xl bg-[#0f172a] border border-gray-700 hover:border-cyan-500/50 cursor-pointer transition select-none group">
+            <label className="flex items-center gap-3 px-5 py-3 rounded-xl bg-crm-bg border border-gray-700 hover:border-cyan-500/50 cursor-pointer transition select-none group">
                 <input 
                     type="checkbox" 
                     className="w-5 h-5 rounded bg-gray-800 border-gray-600 accent-cyan-500"
@@ -137,7 +137,7 @@ export default function ShufflePage() {
                         relative p-5 rounded-xl border cursor-pointer transition-all duration-200 select-none group
                         ${isSelected 
                             ? (isRet ? 'bg-fuchsia-900/20 border-fuchsia-500 shadow-[0_0_20px_rgba(217,70,239,0.2)]' : 'bg-cyan-900/20 border-cyan-500 shadow-[0_0_20px_rgba(6,182,212,0.2)]')
-                            : 'bg-[#1e293b]/50 border-white/5 hover:bg-[#1e293b] hover:border-gray-500'
+                            : 'bg-crm-bg/50 border-white/5 hover:bg-crm-bg hover:border-gray-500'
                         }
                     `}
                 >
@@ -205,7 +205,7 @@ export default function ShufflePage() {
             <button 
                 onClick={handleShuffleClick}
                 disabled={selectedIds.length < 2 || shuffling}
-                className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white px-10 py-3 rounded-xl font-bold text-sm shadow-lg shadow-cyan-900/40 flex items-center gap-3 transition transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed"
+                className="bg-linear-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white px-10 py-3 rounded-xl font-bold text-sm shadow-lg shadow-cyan-900/40 flex items-center gap-3 transition transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed"
             >
                 {shuffling ? <Loader2 className="animate-spin" /> : <Shuffle className="animate-pulse" />}
                 {shuffling ? 'ROTATING LEADS...' : 'START ROTATION'}

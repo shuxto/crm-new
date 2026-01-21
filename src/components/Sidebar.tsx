@@ -1,85 +1,238 @@
-import { PieChart, Users, FolderOpen, Headset, Shuffle, Share2, Power, LayoutGrid, ShieldAlert } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { useState, useEffect } from 'react';
+import { supabase } from '../../lib/supabase';
+import { 
+  Shuffle, Lock, Users, AlertTriangle, CheckCircle2, Loader2, ArrowRight
+} from 'lucide-react';
+import ConfirmationModal from '../Team/ConfirmationModal';
+import SuccessModal from '../Team/SuccessModal';
 
-// UPDATED ROLES
-type UserRole = 'admin' | 'manager' | 'team_leader' | 'retention' | 'conversion' | 'compliance';
-
-interface SidebarProps {
-  role?: UserRole;
-  username?: string;
-  activeView: string;
-  onNavigate: (view: string) => void;
+interface AgentStats {
+  user_id: string;
+  real_name: string;
+  role: string;
+  moveable_count: number;
+  safe_count: number;
 }
 
-export default function Sidebar({ role = 'admin', username = 'User', activeView, onNavigate }: SidebarProps) {
-  
-  // UPDATED STYLES & COLORS
-  const styles: Record<UserRole, { color: string; label: string; bg: string }> = {
-    admin:       { color: 'text-blue-500',    label: 'Admin',    bg: 'bg-blue-600' },
-    manager:     { color: 'text-purple-500',  label: 'Manager',    bg: 'bg-purple-600' },
-    team_leader: { color: 'text-cyan-500',    label: 'Team Lead',  bg: 'bg-cyan-600' },
-    retention:   { color: 'text-fuchsia-500', label: 'Retention',  bg: 'bg-fuchsia-600' },
-    conversion:  { color: 'text-green-500',   label: 'Conversion', bg: 'bg-green-600' },
-    compliance:  { color: 'text-yellow-500',  label: 'Compliance', bg: 'bg-yellow-600' }
+export default function ShufflePage() {
+  const [agents, setAgents] = useState<AgentStats[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [shuffling, setShuffling] = useState(false);
+
+  // Modals
+  const [confirmState, setConfirmState] = useState<{ isOpen: boolean; title: string; message: string }>({ isOpen: false, title: '', message: '' });
+  const [successState, setSuccessState] = useState<{ isOpen: boolean; message: string }>({ isOpen: false, message: '' });
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // Fetch Stats
+  const fetchStats = async () => {
+    setLoading(true);
+    const { data, error } = await supabase.rpc('get_shuffle_stats');
+    if (error) setErrorMsg(error.message);
+    else setAgents(data || []);
+    setLoading(false);
   };
 
-  const currentStyle = styles[role] || styles.conversion;
+  useEffect(() => { fetchStats(); }, []);
 
-  const menuItems = [
-    { id: 'dashboard', name: 'Dashboard', icon: PieChart }, 
-    { id: 'team',      name: 'Team',      icon: Users,       allowed: ['admin', 'manager', 'team_leader'] },
-    // Only Admin & Manager can see Files
-    { id: 'files',     name: 'Files',     icon: FolderOpen,  allowed: ['admin', 'manager'] }, 
-    { id: 'calls',     name: 'Calls',     icon: Headset },
-    { id: 'shuffle',   name: 'Shuffle',   icon: Shuffle,     allowed: ['admin', 'manager', 'team_leader'] },
-    { id: 'splitter',  name: 'Splitter',  icon: Share2,      allowed: ['admin', 'manager'] },
-    // Compliance & Admin only
-    { id: 'compliance', name: 'KYC Center', icon: ShieldAlert, allowed: ['admin', 'compliance', 'manager'] }
-  ];
+  // Selection Logic
+  const toggleAgent = (id: string) => {
+    if (selectedIds.includes(id)) setSelectedIds(selectedIds.filter(i => i !== id));
+    else setSelectedIds([...selectedIds, id]);
+  };
+
+  const toggleAll = (checked: boolean) => {
+    if (checked) setSelectedIds(agents.map(a => a.user_id));
+    else setSelectedIds([]);
+  };
+
+  // Execution
+  const handleShuffleClick = () => {
+    if (selectedIds.length < 2) {
+      alert("Please select at least 2 agents to rotate leads.");
+      return;
+    }
+    setConfirmState({
+      isOpen: true,
+      title: 'Initiate Lead Shuffle',
+      message: `You are about to rotate leads between ${selectedIds.length} agents. "Safe" leads will stay put. This cannot be undone.`
+    });
+  };
+
+  const executeShuffle = async () => {
+    setShuffling(true);
+    setConfirmState({ ...confirmState, isOpen: false });
+    
+    try {
+      const { data, error } = await supabase.rpc('perform_shuffle', { agent_ids: selectedIds });
+      if (error) throw error;
+      
+      setSuccessState({ isOpen: true, message: data });
+      await fetchStats(); // Refresh numbers
+      setSelectedIds([]); // Clear selection
+    } catch (err: any) {
+      setErrorMsg(err.message || "Shuffle Failed");
+    } finally {
+      setShuffling(false);
+    }
+  };
+
+  if (loading) return <div className="h-96 flex items-center justify-center text-cyan-500"><Loader2 className="animate-spin" size={48} /></div>;
 
   return (
-    <aside className="w-48 h-screen sticky top-0 glass-panel flex flex-col p-4 z-50 shadow-2xl">
-      {/* BRANDING */}
-      <div className="flex items-center gap-2 mb-8 overflow-hidden">
-        <div className={`w-8 h-8 ${currentStyle.bg} rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/30`}>
-          <LayoutGrid size={16} className="text-white" />
+    <div className="max-w-7xl mx-auto pb-20 animate-in fade-in zoom-in-95 duration-500">
+      
+      {/* HEADER */}
+      <div className="glass-panel p-8 rounded-2xl relative overflow-hidden group mb-8 border border-cyan-500/20 shadow-[0_0_50px_rgba(6,182,212,0.1)]">
+        <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition duration-500 pointer-events-none">
+            <Shuffle size={180} />
         </div>
-        <h1 className="text-sm font-bold text-white whitespace-nowrap">
-          CRM <span className={currentStyle.color}>{currentStyle.label}</span>
-        </h1>
+        
+        <div className="relative z-10 flex flex-col md:flex-row justify-between items-end gap-6">
+            <div>
+                <h1 className="text-4xl font-bold text-white mb-3 tracking-tight flex items-center gap-3">
+                    <span className="bg-cyan-500/10 p-2 rounded-xl border border-cyan-500/30 text-cyan-400">
+                        <Shuffle size={32} />
+                    </span>
+                    Shuffle Machine
+                </h1>
+                <p className="text-gray-400 text-sm max-w-2xl leading-relaxed">
+                    Rotate leads between agents in a circle (A <ArrowRight size={10} className="inline"/> B <ArrowRight size={10} className="inline"/> C <ArrowRight size={10} className="inline"/> A). <br/>
+                    Leads with <span className="text-cyan-400 font-bold">Safe Statuses</span> (Sale, Deposit, etc.) are locked and will <u className="decoration-red-500">NOT</u> move.
+                </p>
+            </div>
+
+            <label className="flex items-center gap-3 px-5 py-3 rounded-xl bg-crm-bg border border-gray-700 hover:border-cyan-500/50 cursor-pointer transition select-none group">
+                <input 
+                    type="checkbox" 
+                    className="w-5 h-5 rounded bg-gray-800 border-gray-600 accent-cyan-500"
+                    onChange={(e) => toggleAll(e.target.checked)}
+                    checked={selectedIds.length === agents.length && agents.length > 0}
+                />
+                <span className="font-bold text-gray-300 group-hover:text-white">Select All Agents</span>
+            </label>
+        </div>
       </div>
 
-      {/* NAV */}
-      <nav className="flex-1 space-y-1">
-        {menuItems.map((link) => {
-          // @ts-ignore - Allow loose role matching
-          const isVisible = role === 'admin' || !link.allowed || link.allowed.includes(role);
-          if (!isVisible) return null;
+      {/* ERROR MSG */}
+      {errorMsg && (
+        <div className="bg-red-900/20 border border-red-500/50 text-red-400 p-4 rounded-xl mb-6 flex items-center gap-3 animate-in slide-in-from-top-2">
+            <AlertTriangle /> {errorMsg}
+            <button onClick={() => setErrorMsg('')} className="ml-auto hover:text-white"><Users size={16} /></button>
+        </div>
+      )}
 
-          const isActive = activeView === link.id;
+      {/* AGENT GRID */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-8">
+        {agents.map(agent => {
+            const isRet = agent.role === 'retention';
+            const isSelected = selectedIds.includes(agent.user_id);
+            
+            return (
+                <div 
+                    key={agent.user_id}
+                    onClick={() => toggleAgent(agent.user_id)}
+                    className={`
+                        relative p-5 rounded-xl border cursor-pointer transition-all duration-200 select-none group
+                        ${isSelected 
+                            ? (isRet ? 'bg-fuchsia-900/20 border-fuchsia-500 shadow-[0_0_20px_rgba(217,70,239,0.2)]' : 'bg-cyan-900/20 border-cyan-500 shadow-[0_0_20px_rgba(6,182,212,0.2)]')
+                            : 'bg-crm-bg/50 border-white/5 hover:bg-crm-bg hover:border-gray-500'
+                        }
+                    `}
+                >
+                    {/* Header Row */}
+                    <div className="flex items-start justify-between mb-4">
+                        <div className="flex items-center gap-3">
+                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-sm shadow-inner
+                                ${isRet ? 'bg-fuchsia-500/10 text-fuchsia-400' : 'bg-cyan-500/10 text-cyan-400'}
+                            `}>
+                                {agent.real_name.substring(0, 2).toUpperCase()}
+                            </div>
+                            <div>
+                                <div className={`font-bold text-sm ${isSelected ? 'text-white' : 'text-gray-300'}`}>
+                                    {agent.real_name}
+                                </div>
+                                <span className={`text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded
+                                    ${isRet ? 'bg-fuchsia-500/10 text-fuchsia-400' : 'bg-cyan-500/10 text-cyan-400'}
+                                `}>
+                                    {agent.role === 'conversion' ? 'Agent' : 'Retention'}
+                                </span>
+                            </div>
+                        </div>
+                        
+                        {/* Checkbox UI */}
+                        <div className={`w-5 h-5 rounded border flex items-center justify-center transition
+                            ${isSelected 
+                                ? (isRet ? 'bg-fuchsia-500 border-fuchsia-500' : 'bg-cyan-500 border-cyan-500') 
+                                : 'bg-gray-800 border-gray-600'
+                            }
+                        `}>
+                            {isSelected && <CheckCircle2 size={14} className="text-black" />}
+                        </div>
+                    </div>
 
-          return (
-            <button 
-              key={link.id} 
-              onClick={() => onNavigate(link.id)}
-              className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[11px] font-bold transition-all ${isActive ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
-            >
-              <link.icon size={14} /> {link.name}
-            </button>
-          );
+                    {/* Stats Row */}
+                    <div className="flex items-center justify-between text-xs pt-3 border-t border-white/5 group-hover:border-white/10 transition">
+                        <div>
+                            <span className="block font-mono text-white text-xl leading-none mb-1 text-shadow-glow">
+                                {agent.moveable_count.toLocaleString()}
+                            </span>
+                            <span className="text-gray-500">Moveable</span>
+                        </div>
+                        <div className="text-right">
+                            <span className="block font-mono text-gray-500 text-xl leading-none mb-1">
+                                {agent.safe_count.toLocaleString()}
+                            </span>
+                            <span className="flex items-center gap-1 justify-end text-gray-600">
+                                <Lock size={10} /> Safe
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            );
         })}
-      </nav>
-
-      {/* FOOTER */}
-      <div className="mt-auto pt-4 border-t border-white/5 space-y-4">
-        <div className="bg-black/20 rounded-xl p-3 border border-white/5 text-center">
-          <span className={`text-[8px] font-bold uppercase tracking-widest ${currentStyle.color}`}>{role}</span>
-          <p className="text-[10px] font-bold text-white truncate">{username}</p>
-          <button onClick={() => supabase.auth.signOut()} className="mt-2 w-full flex items-center justify-center gap-1 text-[9px] bg-red-500/10 text-red-400 border border-red-500/20 py-1.5 rounded-lg font-bold hover:bg-red-500/20 transition-colors">
-            <Power size={10} /> Logout
-          </button>
-        </div>
       </div>
-    </aside>
+
+      {/* FOOTER ACTIONS */}
+      <div className="fixed bottom-0 left-0 w-full p-4 bg-black/80 backdrop-blur-xl border-t border-white/10 flex justify-center z-40">
+         <div className="max-w-7xl w-full flex items-center justify-between">
+            <div className="text-sm text-gray-500 flex items-center gap-2">
+                <Users size={16} className="text-cyan-500" />
+                <span>{selectedIds.length} Agents Selected</span>
+            </div>
+            
+            <button 
+                onClick={handleShuffleClick}
+                disabled={selectedIds.length < 2 || shuffling}
+                className="bg-linear-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white px-10 py-3 rounded-xl font-bold text-sm shadow-lg shadow-cyan-900/40 flex items-center gap-3 transition transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed"
+            >
+                {shuffling ? <Loader2 className="animate-spin" /> : <Shuffle className="animate-pulse" />}
+                {shuffling ? 'ROTATING LEADS...' : 'START ROTATION'}
+            </button>
+         </div>
+      </div>
+
+      {/* CONFIRMATION MODAL */}
+      <ConfirmationModal 
+        isOpen={confirmState.isOpen}
+        type="danger" // Red warning for dangerous action
+        title={confirmState.title}
+        message={confirmState.message}
+        onClose={() => setConfirmState({ ...confirmState, isOpen: false })}
+        onConfirm={executeShuffle}
+        loading={shuffling}
+      />
+
+      {/* SUCCESS MODAL */}
+      <SuccessModal 
+        isOpen={successState.isOpen}
+        type="success"
+        title="Shuffle Complete"
+        message={successState.message}
+        onClose={() => setSuccessState({ ...successState, isOpen: false })}
+      />
+
+    </div>
   );
 }

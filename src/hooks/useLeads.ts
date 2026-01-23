@@ -88,23 +88,23 @@ export function useLeads(filters: any, currentUserEmail?: string) {
 
   useEffect(() => {
     fetchData();
+    
+    // --- QUOTA SAVER MODE ---
+    // Changed event from '*' to 'INSERT'.
+    // We now ONLY listen for NEW leads. Updates/Deletes are ignored to save messages.
+    // Why? Because 100 updates = 100 messages. 1 Insert = 1 message. This is 99% cheaper.
     const leadSub = supabase.channel('table-leads')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_leads' }, (payload) => {
-          if (payload.eventType === 'UPDATE') {
-             setLeads(currentLeads => currentLeads.map(lead => lead.id === payload.new.id ? { ...lead, ...payload.new } : lead));
-          } else if (payload.eventType === 'INSERT') {
-             setLeads(currentLeads => [payload.new as Lead, ...currentLeads]);
-          } else if (payload.eventType === 'DELETE') {
-             setLeads(currentLeads => currentLeads.filter(lead => lead.id !== payload.old.id));
-          }
-      }).subscribe();
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'crm_leads' }, (payload) => {
+          setLeads(currentLeads => [payload.new as Lead, ...currentLeads]);
+          setTotalCount(prev => prev + 1);
+      })
+      .subscribe();
       
     return () => { supabase.removeChannel(leadSub); };
   }, [filters]);
 
   // --- ACTIONS ---
 
-  // NEW: Helper to update local state instantly (For Notes Icon)
   const updateLocalLead = (id: string, updates: Partial<Lead>) => {
     setLeads(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l));
   };
@@ -113,6 +113,7 @@ export function useLeads(filters: any, currentUserEmail?: string) {
     const lead = leads.find(l => l.id === leadId);
     const oldStatus = lead ? lead.status : null;
 
+    // Optimistic Update (Instant)
     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus } : l));
     
     if (oldStatus && oldStatus !== newStatus) {
@@ -125,6 +126,7 @@ export function useLeads(filters: any, currentUserEmail?: string) {
   };
 
   const updateLeadAgent = async (leadId: string, agentId: string | null) => {
+    // Optimistic Update
     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, assigned_to: agentId } : l));
     const { error } = await supabase.from('crm_leads').update({ assigned_to: agentId }).eq('id', leadId);
     if (error) alert("Failed to assign agent");
@@ -169,6 +171,6 @@ export function useLeads(filters: any, currentUserEmail?: string) {
     leads, totalCount, statusOptions, agents, loading, 
     updateLeadStatus, updateLeadAgent, deleteLead,
     bulkUpdateStatus, bulkUpdateAgent, bulkDeleteLeads,
-    updateLocalLead // <--- EXPORTED THIS
+    updateLocalLead 
   };
 }

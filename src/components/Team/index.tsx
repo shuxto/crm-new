@@ -1,16 +1,16 @@
-// src/components/Team/index.tsx
-
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { 
   Users, Crown, Briefcase, Key, Headset, Phone, ShieldAlert, UserPlus, Loader2, Search
 } from 'lucide-react';
-import type { CRMUser } from './types'; // <--- Imports from shared file
+import type { CRMUser } from './types';
 
 // SUB-COMPONENTS
 import TeamStats from './TeamStats';
 import TeamTable from './TeamTable';
 import CreateUserModal from './CreateUserModal';
+import EditUserModal from './EditUserModal'; // <--- NEW
+import PromoteModal from './PromoteModal';   // <--- NEW
 import ManageTeamModal from './ManageTeamModal';
 import PermsModal from './PermsModal';
 import ConfirmationModal from './ConfirmationModal';
@@ -29,6 +29,10 @@ export default function TeamManagement() {
   const [showCreate, setShowCreate] = useState(false);
   const [selectedLeader, setSelectedLeader] = useState<CRMUser | null>(null);
   const [selectedManager, setSelectedManager] = useState<CRMUser | null>(null);
+  
+  // NEW EDIT MODALS
+  const [editUser, setEditUser] = useState<CRMUser | null>(null);
+  const [promoteUser, setPromoteUser] = useState<CRMUser | null>(null);
 
   // NOTIFICATION STATE
   const [notif, setNotif] = useState<{ isOpen: boolean; type: 'success'|'error'; title: string; message: string }>({
@@ -45,22 +49,15 @@ export default function TeamManagement() {
   const fetchTeamData = async (silent = false) => {
     if (!silent) setLoading(true);
     
-    // 1. Get CRM Users
     const { data: crmData } = await supabase.from('crm_users').select('*').order('created_at', { ascending: false });
-    
-    // 2. Get Trading Roles (RPC Call)
     const { data: tradingRoles } = await supabase.rpc('get_trading_roles');
-    
     const tradingRoleMap = new Map((tradingRoles || []).map((u: any) => [u.id, u.role]));
-
-    // 3. Get Folders
     const { data: folderData } = await supabase.from('crm_leads').select('source_file');
     const uniqueFolders = Array.from(new Set((folderData || []).map(f => f.source_file).filter(f => f && f !== ''))) as string[];
 
     if (crmData) {
         const mergedUsers = crmData.map((u: any) => ({
             ...u,
-            // Check if their CRM role matches exactly what is in the Trading Profile
             is_synced: tradingRoleMap.get(u.id) === u.role 
         }));
         setUsers(mergedUsers as CRMUser[]);
@@ -77,36 +74,23 @@ export default function TeamManagement() {
 
   // --- ACTIONS ---
 
-  // 👇👇👇 THIS IS THE FIX (USING EDGE FUNCTION) 👇👇👇
   const handleDeleteClick = (userId: string) => {
     setConfirmState({
-      isOpen: true, 
-      type: 'danger', 
-      title: 'Delete User?', 
-      message: 'This action will permanently delete the user, their trades, and logs. It cannot be undone.',
+      isOpen: true, type: 'danger', title: 'Delete User?', message: 'This action will permanently delete the user, their trades, and logs.',
       action: async () => {
-        // CALL THE ASSASSIN (Edge Function)
-        const { data, error } = await supabase.functions.invoke('delete-user', {
-            body: { user_id: userId }
-        });
-        
-        // Handle Errors
+        const { data, error } = await supabase.functions.invoke('delete-user', { body: { user_id: userId } });
         if (error) throw error;
         if (data && data.error) throw new Error(data.error);
       }
     });
   };
-  // 👆👆👆 END OF FIX 👆👆👆
 
   const handleSyncRoleClick = (user: CRMUser) => {
     setConfirmState({
       isOpen: true, type: 'success', title: `Sync ${user.role.toUpperCase()} Role?`,
-      message: `Update ${user.real_name}'s role in the Trading Platform to "${user.role}"?`,
+      message: `Update ${user.real_name}'s role in the Trading Platform?`,
       action: async () => {
-        const { error } = await supabase.rpc('sync_trading_role', { 
-            target_user_id: user.id,
-            target_role: user.role 
-        });
+        const { error } = await supabase.rpc('sync_trading_role', { target_user_id: user.id, target_role: user.role });
         if (error) throw error;
       }
     });
@@ -114,10 +98,7 @@ export default function TeamManagement() {
 
   const handleBulkRemoveFromTeam = (agentIds: string[]) => {
     setConfirmState({
-        isOpen: true,
-        type: 'danger',
-        title: `Remove ${agentIds.length} Agents?`,
-        message: 'They will be unassigned from this team leader immediately.',
+        isOpen: true, type: 'danger', title: `Remove ${agentIds.length} Agents?`, message: 'They will be unassigned from this team leader.',
         action: async () => {
             const { error } = await supabase.from('crm_users').update({ team_leader_id: null }).in('id', agentIds);
             if (error) throw error;
@@ -131,7 +112,7 @@ export default function TeamManagement() {
       await confirmState.action();
       setConfirmState({ ...confirmState, isOpen: false });
       showPopup('success', 'Operation Successful', 'The action has been completed.');
-      await fetchTeamData(true); // REFRESH LIST
+      await fetchTeamData(true);
     } catch (err: any) { 
         console.error("Action Error:", err);
         showPopup('error', 'Action Failed', err.message || "Unknown Error");
@@ -161,9 +142,7 @@ export default function TeamManagement() {
       {/* HEADER SECTION */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <div className="md:col-span-2 glass-panel p-8 rounded-2xl relative overflow-hidden group flex flex-col justify-between min-h-60">
-            <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition duration-500 pointer-events-none z-0">
-                <Crown size={180} />
-            </div>
+            <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition duration-500 pointer-events-none z-0"><Crown size={180} /></div>
             <div className="relative z-10">
                 <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Team Command</h1>
                 <p className="text-gray-400 text-sm mb-6 max-w-md">Manage hierarchy, roles, and access permissions for the entire organization.</p>
@@ -171,32 +150,18 @@ export default function TeamManagement() {
             <div className="relative z-10 flex gap-3 mt-auto items-center">
                  <div className="relative flex-1 group">
                     <Search className="absolute left-3 top-3 text-gray-500 group-focus-within:text-cyan-400 transition" size={18} />
-                    <input 
-                        type="text" 
-                        placeholder="Search users..." 
-                        className="w-full bg-crm-bg/50 border border-white/10 pl-10 py-3 rounded-xl text-white placeholder-gray-500 focus:border-cyan-500 outline-none backdrop-blur-md transition shadow-inner"
-                        value={mainSearch}
-                        onChange={(e) => setMainSearch(e.target.value)}
-                    />
+                    <input type="text" placeholder="Search users..." className="w-full bg-crm-bg/50 border border-white/10 pl-10 py-3 rounded-xl text-white placeholder-gray-500 focus:border-cyan-500 outline-none backdrop-blur-md transition shadow-inner" value={mainSearch} onChange={(e) => setMainSearch(e.target.value)} />
                  </div>
-                 <button 
-                    onClick={() => setShowCreate(true)} 
-                    className="bg-cyan-600 hover:bg-cyan-500 text-white px-6 py-3 rounded-xl font-bold shadow-lg shadow-cyan-900/20 transition hover:scale-105 active:scale-95 flex items-center gap-2 whitespace-nowrap cursor-pointer z-20"
-                 >
-                    <UserPlus size={18} /> Add Member
-                </button>
+                 <button onClick={() => setShowCreate(true)} className="bg-cyan-600 hover:bg-cyan-500 text-white px-6 py-3 rounded-xl font-bold shadow-lg shadow-cyan-900/20 transition hover:scale-105 active:scale-95 flex items-center gap-2 whitespace-nowrap cursor-pointer z-20"><UserPlus size={18} /> Add Member</button>
             </div>
         </div>
-        
         <TeamStats stats={stats} />
       </div>
 
       {/* TABS */}
       <div className="flex border-b border-gray-700 mb-8 overflow-x-auto custom-scrollbar">
         {[{ id: 'staff', label: 'All Staff', icon: Users }, { id: 'admins', label: 'Admins', icon: Crown }, { id: 'managers', label: 'Managers', icon: Key }, { id: 'leaders', label: 'Team Leaders', icon: Briefcase }, { id: 'conversion', label: 'Conversion', icon: Headset }, { id: 'retention', label: 'Retention', icon: Phone }, { id: 'compliance', label: 'Compliance', icon: ShieldAlert }].map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-6 py-4 font-bold text-sm transition flex items-center gap-2 border-b-2 whitespace-nowrap cursor-pointer ${activeTab === tab.id ? 'border-cyan-500 text-cyan-400 bg-cyan-500/5' : 'border-transparent text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}>
-                <tab.icon size={16} /> {tab.label}
-            </button>
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-6 py-4 font-bold text-sm transition flex items-center gap-2 border-b-2 whitespace-nowrap cursor-pointer ${activeTab === tab.id ? 'border-cyan-500 text-cyan-400 bg-cyan-500/5' : 'border-transparent text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}><tab.icon size={16} /> {tab.label}</button>
         ))}
       </div>
 
@@ -207,20 +172,17 @@ export default function TeamManagement() {
         onManageLeader={(leader) => setSelectedLeader(leader)}
         onManagePerms={(manager) => setSelectedManager(manager)}
         onPromoteTrading={handleSyncRoleClick} 
+        onEditUser={(user) => setEditUser(user)}         // <--- WIRED
+        onChangeRole={(user) => setPromoteUser(user)}    // <--- WIRED
       />
 
       {/* MODALS */}
       {showCreate && <CreateUserModal onClose={() => setShowCreate(false)} onSuccess={() => { setShowCreate(false); showPopup('success', 'User Created', 'New member added to the database.'); fetchTeamData(true); }} />}
       
-      {selectedLeader && (
-        <ManageTeamModal 
-            leader={selectedLeader} allUsers={users} 
-            onClose={() => setSelectedLeader(null)} 
-            onSuccess={() => { showPopup('success', 'Team Updated', 'Agents assigned successfully.'); fetchTeamData(true); }} 
-            onConfirmRemove={handleBulkRemoveFromTeam}
-        />
-      )}
-      
+      {editUser && <EditUserModal user={editUser} onClose={() => setEditUser(null)} onSuccess={() => { setEditUser(null); fetchTeamData(true); }} />}
+      {promoteUser && <PromoteModal user={promoteUser} onClose={() => setPromoteUser(null)} onSuccess={() => { setPromoteUser(null); fetchTeamData(true); }} />}
+
+      {selectedLeader && (<ManageTeamModal leader={selectedLeader} allUsers={users} onClose={() => setSelectedLeader(null)} onSuccess={() => { showPopup('success', 'Team Updated', 'Agents assigned successfully.'); fetchTeamData(true); }} onConfirmRemove={handleBulkRemoveFromTeam}/>)}
       {selectedManager && <PermsModal manager={selectedManager} folders={folders} onClose={() => setSelectedManager(null)} onSuccess={() => { setSelectedManager(null); showPopup('success', 'Permissions Saved', 'Folder access updated.'); fetchTeamData(true); }} />}
       
       <ConfirmationModal isOpen={confirmState.isOpen} type={confirmState.type} title={confirmState.title} message={confirmState.message} onConfirm={handleConfirmAction} onClose={() => setConfirmState({...confirmState, isOpen: false})} loading={actionLoading} />

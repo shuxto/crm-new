@@ -44,6 +44,7 @@ export default function StatsGrid({ selectedStatuses, onToggleStatus }: StatsGri
     fetchData();
 
     // 1. LISTEN FOR INSTANT UPDATES FROM TABLE (0ms Latency)
+    // This is SAFE. It happens only in your browser memory.
     const handleInstantUpdate = (e: any) => {
         const { oldStatus, newStatus } = e.detail;
         
@@ -63,14 +64,15 @@ export default function StatsGrid({ selectedStatuses, onToggleStatus }: StatsGri
     window.addEventListener('crm-lead-update', handleInstantUpdate);
 
     // 2. BACKUP: Realtime DB Subscription (Safety Net)
-    const statusSub = supabase.channel('grid-statuses').on('postgres_changes', { event: '*', schema: 'public', table: 'crm_statuses' }, fetchData).subscribe();
-    // Note: We don't strictly need lead subscription anymore if optimistic UI works, but it's good for multi-user sync
+    // ⚠️ DISABLED TO SAVE QUOTA (2M Messages Limit)
+    /* const statusSub = supabase.channel('grid-statuses').on('postgres_changes', { event: '*', schema: 'public', table: 'crm_statuses' }, fetchData).subscribe();
     const leadsSub = supabase.channel('grid-leads').on('postgres_changes', { event: '*', schema: 'public', table: 'crm_leads' }, fetchData).subscribe();
+    */
 
     return () => { 
       window.removeEventListener('crm-lead-update', handleInstantUpdate);
-      supabase.removeChannel(statusSub);
-      supabase.removeChannel(leadsSub);
+      // supabase.removeChannel(statusSub);
+      // supabase.removeChannel(leadsSub);
     };
   }, []);
 

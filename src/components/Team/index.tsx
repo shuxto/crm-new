@@ -1,9 +1,11 @@
+// src/components/Team/index.tsx
+
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { 
   Users, Crown, Briefcase, Key, Headset, Phone, ShieldAlert, UserPlus, Loader2, Search
 } from 'lucide-react';
-import type { CRMUser } from './types';
+import type { CRMUser } from './types'; // <--- Imports from shared file
 
 // SUB-COMPONENTS
 import TeamStats from './TeamStats';
@@ -48,7 +50,7 @@ export default function TeamManagement() {
     
     // 2. Get Trading Roles (RPC Call)
     const { data: tradingRoles } = await supabase.rpc('get_trading_roles');
-    // Map: ID -> Role (e.g. "uuid-123" -> "manager")
+    
     const tradingRoleMap = new Map((tradingRoles || []).map((u: any) => [u.id, u.role]));
 
     // 3. Get Folders
@@ -75,17 +77,27 @@ export default function TeamManagement() {
 
   // --- ACTIONS ---
 
+  // 👇👇👇 THIS IS THE FIX (USING EDGE FUNCTION) 👇👇👇
   const handleDeleteClick = (userId: string) => {
     setConfirmState({
-      isOpen: true, type: 'danger', title: 'Delete User?', message: 'This action cannot be undone.',
+      isOpen: true, 
+      type: 'danger', 
+      title: 'Delete User?', 
+      message: 'This action will permanently delete the user, their trades, and logs. It cannot be undone.',
       action: async () => {
-        const { error } = await supabase.from('crm_users').delete().eq('id', userId);
+        // CALL THE ASSASSIN (Edge Function)
+        const { data, error } = await supabase.functions.invoke('delete-user', {
+            body: { user_id: userId }
+        });
+        
+        // Handle Errors
         if (error) throw error;
+        if (data && data.error) throw new Error(data.error);
       }
     });
   };
+  // 👆👆👆 END OF FIX 👆👆👆
 
-  // NEW: GENERIC SYNC HANDLER (Admin, Manager, Compliance)
   const handleSyncRoleClick = (user: CRMUser) => {
     setConfirmState({
       isOpen: true, type: 'success', title: `Sync ${user.role.toUpperCase()} Role?`,
@@ -119,9 +131,10 @@ export default function TeamManagement() {
       await confirmState.action();
       setConfirmState({ ...confirmState, isOpen: false });
       showPopup('success', 'Operation Successful', 'The action has been completed.');
-      await fetchTeamData(true);
+      await fetchTeamData(true); // REFRESH LIST
     } catch (err: any) { 
-        showPopup('error', 'Action Failed', err.message);
+        console.error("Action Error:", err);
+        showPopup('error', 'Action Failed', err.message || "Unknown Error");
     } 
     finally { setActionLoading(false); }
   };
@@ -148,16 +161,13 @@ export default function TeamManagement() {
       {/* HEADER SECTION */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <div className="md:col-span-2 glass-panel p-8 rounded-2xl relative overflow-hidden group flex flex-col justify-between min-h-60">
-            
             <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition duration-500 pointer-events-none z-0">
                 <Crown size={180} />
             </div>
-
             <div className="relative z-10">
                 <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Team Command</h1>
                 <p className="text-gray-400 text-sm mb-6 max-w-md">Manage hierarchy, roles, and access permissions for the entire organization.</p>
             </div>
-            
             <div className="relative z-10 flex gap-3 mt-auto items-center">
                  <div className="relative flex-1 group">
                     <Search className="absolute left-3 top-3 text-gray-500 group-focus-within:text-cyan-400 transition" size={18} />
@@ -196,7 +206,7 @@ export default function TeamManagement() {
         onDelete={handleDeleteClick} 
         onManageLeader={(leader) => setSelectedLeader(leader)}
         onManagePerms={(manager) => setSelectedManager(manager)}
-        onPromoteTrading={handleSyncRoleClick} // <--- Pass the new handler
+        onPromoteTrading={handleSyncRoleClick} 
       />
 
       {/* MODALS */}

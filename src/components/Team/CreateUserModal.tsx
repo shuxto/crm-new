@@ -11,16 +11,34 @@ export default function CreateUserModal({ onClose, onSuccess }: Props) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    
     try {
-      const { error } = await supabase.rpc('create_new_user', {
-        email: formData.email, password: formData.password, real_name: formData.real_name, user_role: formData.role
+      // --- NEW: CALL EDGE FUNCTION INSTEAD OF SQL ---
+      const { data, error } = await supabase.functions.invoke('create-user', {
+        body: { 
+          email: formData.email, 
+          password: formData.password, 
+          real_name: formData.real_name, 
+          role: formData.role 
+        }
       });
-      if (error) throw error;
-      onSuccess(); // Triggers parent popup
+
+      // 1. Check for Network/System Errors
+      if (error) throw new Error(error.message || 'Connection to Edge Function failed');
+      
+      // 2. Check for Logic Errors (e.g. "User already exists") sent by the function
+      if (data?.error) throw new Error(data.error);
+
+      // --- SUCCESS ---
+      window.dispatchEvent(new CustomEvent('crm-toast', { detail: { message: 'User created successfully!', type: 'success' } }));
+      onSuccess(); // Triggers parent popup to close and refresh list
+
     } catch (err: any) { 
-        alert('Error: ' + err.message); // Fallback for critical error
+        // Show error alert
+        alert('Error: ' + err.message); 
+    } finally {
         setLoading(false);
-    } 
+    }
   };
 
   return (

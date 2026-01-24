@@ -12,6 +12,7 @@ import NotificationSystem from './components/NotificationSystem';
 import FileManager from './components/Files';
 import TeamManagement from './components/Team'; 
 import ShufflePage from './components/Shuffle'; 
+import CallsPage from './components/Calls';
 
 export default function App() {
   const [session, setSession] = useState<any>(null);
@@ -137,8 +138,9 @@ export default function App() {
         
         {currentView === 'team' && <TeamManagement />} 
 
-        {/* --- ADDED SHUFFLE PAGE --- */}
         {currentView === 'shuffle' && <ShufflePage />}
+
+        {currentView === 'calls' && <CallsPage />}
 
       </main>
     </div>

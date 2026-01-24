@@ -1,7 +1,9 @@
-import { Phone, Mail, Eye, MessageSquare, Trash2, ShieldCheck, ShieldAlert, Shield } from 'lucide-react';
+import { useState } from 'react';
+import { Phone, Mail, Eye, MessageSquare, Trash2, ShieldCheck, ShieldAlert, Shield, Loader2 } from 'lucide-react';
 import { type Lead } from '../../hooks/useLeads';
 import StatusCell from './StatusCell';
 import AssignAgentCell from './AssignAgentCell';
+import { initiateCall } from '../../lib/callSystem';
 
 interface LeadsTableRowProps {
   lead: Lead;
@@ -40,6 +42,21 @@ export default function LeadsTableRow({
   onStatusUpdateInterceptor, updateLeadAgent, rowIndex, totalRows
 }: LeadsTableRowProps) {
   
+  const [isCalling, setIsCalling] = useState(false);
+
+  // HANDLE QUICK CALL
+  const handleQuickCall = async (e: React.MouseEvent) => {
+    e.stopPropagation(); // Stop row click
+    if (!lead.phone || isCalling) return;
+    
+    setIsCalling(true);
+    // Trigger the system
+    await initiateCall(lead.id, lead.phone);
+    
+    // Reset after 2 seconds
+    setTimeout(() => setIsCalling(false), 2000);
+  };
+
   return (
     <tr 
       className={`
@@ -80,11 +97,26 @@ export default function LeadsTableRow({
 
       <td className="p-4">
         <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2 text-gray-400 hover:text-blue-400 cursor-pointer">
-            <Phone size={10} />
-            <span className="font-mono text-xs">{lead.phone}</span>
+          {/* UPDATED PHONE ROW WITH BUTTON */}
+          <div className="flex items-center gap-2">
+            <button 
+               onClick={handleQuickCall}
+               disabled={isCalling}
+               className={`p-1.5 rounded-lg transition-all border ${
+                 isCalling 
+                   ? 'bg-green-500/20 text-green-400 border-green-500/30' 
+                   : 'bg-blue-500/10 text-blue-400 border-blue-500/20 hover:bg-blue-500/20 hover:scale-105'
+               }`}
+               title="Call Now"
+            >
+               {isCalling ? <Loader2 size={12} className="animate-spin" /> : <Phone size={12} />}
+            </button>
+            <span className={`font-mono text-xs ${isCalling ? 'text-green-400' : 'text-gray-400'}`}>
+                {lead.phone}
+            </span>
           </div>
-          <div className="flex items-center gap-2 text-gray-500">
+
+          <div className="flex items-center gap-2 text-gray-500 ml-1">
             <Mail size={10} />
             <span className="text-[10px] truncate max-w-37.5">{lead.email}</span>
           </div>

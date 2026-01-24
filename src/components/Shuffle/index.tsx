@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { 
-  Shuffle, Lock, Users, AlertTriangle, CheckCircle2, Loader2, ArrowRight
+  Shuffle, Lock, Users, AlertTriangle, CheckCircle2, Loader2, ArrowRight, Search
 } from 'lucide-react';
 import ConfirmationModal from '../Team/ConfirmationModal';
 import SuccessModal from '../Team/SuccessModal';
@@ -19,6 +19,9 @@ export default function ShufflePage() {
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [shuffling, setShuffling] = useState(false);
+  
+  // NEW: Search State
+  const [search, setSearch] = useState('');
 
   // Modals
   const [confirmState, setConfirmState] = useState<{ isOpen: boolean; title: string; message: string }>({ isOpen: false, title: '', message: '' });
@@ -42,9 +45,21 @@ export default function ShufflePage() {
     else setSelectedIds([...selectedIds, id]);
   };
 
+  // UPDATED: Toggle all now respects the search filter
   const toggleAll = (checked: boolean) => {
-    if (checked) setSelectedIds(agents.map(a => a.user_id));
-    else setSelectedIds([]);
+    if (checked) {
+      // Only select visible agents if searching, or all if not
+      const visibleIds = filteredAgents.map(a => a.user_id);
+      // Combine with existing selections to avoid losing unchecked invisible ones if needed, 
+      // but usually "Select All" implies "Select All Visible". 
+      // Let's keep it simple: Select all currently visible.
+      const newSelection = [...new Set([...selectedIds, ...visibleIds])];
+      setSelectedIds(newSelection);
+    } else {
+      // Deselect all visible
+      const visibleIds = filteredAgents.map(a => a.user_id);
+      setSelectedIds(selectedIds.filter(id => !visibleIds.includes(id)));
+    }
   };
 
   // Execution
@@ -78,13 +93,18 @@ export default function ShufflePage() {
     }
   };
 
+  // Filter Agents based on Search
+  const filteredAgents = agents.filter(agent => 
+    agent.real_name.toLowerCase().includes(search.toLowerCase())
+  );
+
   if (loading) return <div className="h-96 flex items-center justify-center text-cyan-500"><Loader2 className="animate-spin" size={48} /></div>;
 
   return (
     <div className="max-w-7xl mx-auto pb-20 animate-in fade-in zoom-in-95 duration-500">
       
       {/* HEADER */}
-      <div className="glass-panel p-8 rounded-2xl relative overflow-hidden group mb-8 border border-cyan-500/20 shadow-[0_0_50px_rgba(6,182,212,0.1)]">
+      <div className="glass-panel p-8 rounded-2xl relative overflow-hidden group mb-6 border border-cyan-500/20 shadow-[0_0_50px_rgba(6,182,212,0.1)]">
         <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition duration-500 pointer-events-none">
             <Shuffle size={180} />
         </div>
@@ -103,15 +123,30 @@ export default function ShufflePage() {
                 </p>
             </div>
 
-            <label className="flex items-center gap-3 px-5 py-3 rounded-xl bg-crm-bg border border-gray-700 hover:border-cyan-500/50 cursor-pointer transition select-none group">
-                <input 
-                    type="checkbox" 
-                    className="w-5 h-5 rounded bg-gray-800 border-gray-600 accent-cyan-500"
-                    onChange={(e) => toggleAll(e.target.checked)}
-                    checked={selectedIds.length === agents.length && agents.length > 0}
-                />
-                <span className="font-bold text-gray-300 group-hover:text-white">Select All Agents</span>
-            </label>
+            <div className="flex flex-col sm:flex-row items-stretch gap-3 w-full md:w-auto">
+                {/* NEW: Search Input */}
+                <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
+                    <input 
+                        type="text" 
+                        placeholder="Search agents..." 
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        className="w-full pl-9 pr-4 py-3 bg-black/40 border border-gray-700 rounded-xl focus:border-cyan-500 focus:outline-none text-white text-sm placeholder:text-gray-600 transition"
+                    />
+                </div>
+
+                <label className="flex items-center gap-3 px-5 py-3 rounded-xl bg-crm-bg border border-gray-700 hover:border-cyan-500/50 cursor-pointer transition select-none group whitespace-nowrap">
+                    <input 
+                        type="checkbox" 
+                        className="w-5 h-5 rounded bg-gray-800 border-gray-600 accent-cyan-500"
+                        onChange={(e) => toggleAll(e.target.checked)}
+                        // Check if all VISIBLE agents are selected
+                        checked={filteredAgents.length > 0 && filteredAgents.every(a => selectedIds.includes(a.user_id))}
+                    />
+                    <span className="font-bold text-gray-300 group-hover:text-white">Select All</span>
+                </label>
+            </div>
         </div>
       </div>
 
@@ -123,9 +158,9 @@ export default function ShufflePage() {
         </div>
       )}
 
-      {/* AGENT GRID */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-8">
-        {agents.map(agent => {
+      {/* AGENT GRID - UPDATED: Added filteredAgents and adjusted sizing */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 mb-8">
+        {filteredAgents.map(agent => {
             const isRet = agent.role === 'retention';
             const isSelected = selectedIds.includes(agent.user_id);
             
@@ -134,23 +169,24 @@ export default function ShufflePage() {
                     key={agent.user_id}
                     onClick={() => toggleAgent(agent.user_id)}
                     className={`
-                        relative p-5 rounded-xl border cursor-pointer transition-all duration-200 select-none group
+                        relative p-3 rounded-xl border cursor-pointer transition-all duration-200 select-none group
                         ${isSelected 
                             ? (isRet ? 'bg-fuchsia-900/20 border-fuchsia-500 shadow-[0_0_20px_rgba(217,70,239,0.2)]' : 'bg-cyan-900/20 border-cyan-500 shadow-[0_0_20px_rgba(6,182,212,0.2)]')
                             : 'bg-crm-bg/50 border-white/5 hover:bg-crm-bg hover:border-gray-500'
                         }
                     `}
                 >
-                    {/* Header Row */}
-                    <div className="flex items-start justify-between mb-4">
-                        <div className="flex items-center gap-3">
-                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-sm shadow-inner
+                    {/* Header Row - UPDATED: Compact Sizing */}
+                    <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                            {/* Avatar: w-8 h-8 (was w-10 h-10) */}
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs shadow-inner
                                 ${isRet ? 'bg-fuchsia-500/10 text-fuchsia-400' : 'bg-cyan-500/10 text-cyan-400'}
                             `}>
                                 {agent.real_name.substring(0, 2).toUpperCase()}
                             </div>
-                            <div>
-                                <div className={`font-bold text-sm ${isSelected ? 'text-white' : 'text-gray-300'}`}>
+                            <div className="overflow-hidden">
+                                <div className={`font-bold text-sm truncate ${isSelected ? 'text-white' : 'text-gray-300'}`}>
                                     {agent.real_name}
                                 </div>
                                 <span className={`text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded
@@ -162,30 +198,31 @@ export default function ShufflePage() {
                         </div>
                         
                         {/* Checkbox UI */}
-                        <div className={`w-5 h-5 rounded border flex items-center justify-center transition
+                        <div className={`w-4 h-4 rounded border flex items-center justify-center transition shrink-0
                             ${isSelected 
                                 ? (isRet ? 'bg-fuchsia-500 border-fuchsia-500' : 'bg-cyan-500 border-cyan-500') 
                                 : 'bg-gray-800 border-gray-600'
                             }
                         `}>
-                            {isSelected && <CheckCircle2 size={14} className="text-black" />}
+                            {isSelected && <CheckCircle2 size={12} className="text-black" />}
                         </div>
                     </div>
 
-                    {/* Stats Row */}
-                    <div className="flex items-center justify-between text-xs pt-3 border-t border-white/5 group-hover:border-white/10 transition">
+                    {/* Stats Row - UPDATED: Compact Sizing */}
+                    <div className="flex items-center justify-between text-xs pt-2 border-t border-white/5 group-hover:border-white/10 transition">
                         <div>
-                            <span className="block font-mono text-white text-xl leading-none mb-1 text-shadow-glow">
+                            {/* Number: text-lg (was text-xl) */}
+                            <span className="block font-mono text-white text-lg leading-none mb-0.5 text-shadow-glow">
                                 {agent.moveable_count.toLocaleString()}
                             </span>
-                            <span className="text-gray-500">Moveable</span>
+                            <span className="text-gray-500 text-[10px]">Moveable</span>
                         </div>
                         <div className="text-right">
-                            <span className="block font-mono text-gray-500 text-xl leading-none mb-1">
+                            <span className="block font-mono text-gray-500 text-lg leading-none mb-0.5">
                                 {agent.safe_count.toLocaleString()}
                             </span>
-                            <span className="flex items-center gap-1 justify-end text-gray-600">
-                                <Lock size={10} /> Safe
+                            <span className="flex items-center gap-1 justify-end text-gray-600 text-[10px]">
+                                <Lock size={8} /> Safe
                             </span>
                         </div>
                     </div>

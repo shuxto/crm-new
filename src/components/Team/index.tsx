@@ -9,10 +9,10 @@ import type { CRMUser } from './types';
 import TeamStats from './TeamStats';
 import TeamTable from './TeamTable';
 import CreateUserModal from './CreateUserModal';
-import EditUserModal from './EditUserModal'; // <--- NEW
-import PromoteModal from './PromoteModal';   // <--- NEW
-import ManageTeamModal from './ManageTeamModal';
-import PermsModal from './PermsModal';
+import EditUserModal from './EditUserModal'; 
+import PromoteModal from './PromoteModal';   
+import ManageTeamModal from './ManageTeamModal'; // <--- Ensure this file exists
+import PermsModal from './PermsModal';           // <--- Ensure this file exists
 import ConfirmationModal from './ConfirmationModal';
 import SuccessModal from './SuccessModal';
 
@@ -53,7 +53,7 @@ export default function TeamManagement() {
     const { data: tradingRoles } = await supabase.rpc('get_trading_roles');
     const tradingRoleMap = new Map((tradingRoles || []).map((u: any) => [u.id, u.role]));
     const { data: folderData } = await supabase.from('crm_leads').select('source_file');
-    const uniqueFolders = Array.from(new Set((folderData || []).map(f => f.source_file).filter(f => f && f !== ''))) as string[];
+    const uniqueFolders = Array.from(new Set((folderData || []).map((f: any) => f.source_file).filter((f: any) => f && f !== ''))) as string[];
 
     if (crmData) {
         const mergedUsers = crmData.map((u: any) => ({
@@ -121,8 +121,8 @@ export default function TeamManagement() {
   };
 
   const filteredUsers = users.filter(u => 
-    u.real_name.toLowerCase().includes(mainSearch.toLowerCase()) || 
-    u.email.toLowerCase().includes(mainSearch.toLowerCase())
+    (u.real_name || '').toLowerCase().includes(mainSearch.toLowerCase()) || 
+    (u.email || '').toLowerCase().includes(mainSearch.toLowerCase())
   );
 
   const stats = {
@@ -172,8 +172,8 @@ export default function TeamManagement() {
         onManageLeader={(leader) => setSelectedLeader(leader)}
         onManagePerms={(manager) => setSelectedManager(manager)}
         onPromoteTrading={handleSyncRoleClick} 
-        onEditUser={(user) => setEditUser(user)}         // <--- WIRED
-        onChangeRole={(user) => setPromoteUser(user)}    // <--- WIRED
+        onEditUser={(user) => setEditUser(user)} 
+        onChangeRole={(user) => setPromoteUser(user)} 
       />
 
       {/* MODALS */}
@@ -183,7 +183,19 @@ export default function TeamManagement() {
       {promoteUser && <PromoteModal user={promoteUser} onClose={() => setPromoteUser(null)} onSuccess={() => { setPromoteUser(null); fetchTeamData(true); }} />}
 
       {selectedLeader && (<ManageTeamModal leader={selectedLeader} allUsers={users} onClose={() => setSelectedLeader(null)} onSuccess={() => { showPopup('success', 'Team Updated', 'Agents assigned successfully.'); fetchTeamData(true); }} onConfirmRemove={handleBulkRemoveFromTeam}/>)}
-      {selectedManager && <PermsModal manager={selectedManager} folders={folders} onClose={() => setSelectedManager(null)} onSuccess={() => { setSelectedManager(null); showPopup('success', 'Permissions Saved', 'Folder access updated.'); fetchTeamData(true); }} />}
+      
+      {selectedManager && (
+        <PermsModal 
+            manager={selectedManager}  // <--- Ensure Prop Name is "manager"
+            folders={folders} 
+            onClose={() => setSelectedManager(null)} 
+            onSuccess={() => { 
+                setSelectedManager(null); 
+                showPopup('success', 'Permissions Saved', 'Folder access updated.'); 
+                fetchTeamData(true); 
+            }} 
+        />
+      )}
       
       <ConfirmationModal isOpen={confirmState.isOpen} type={confirmState.type} title={confirmState.title} message={confirmState.message} onConfirm={handleConfirmAction} onClose={() => setConfirmState({...confirmState, isOpen: false})} loading={actionLoading} />
       <SuccessModal isOpen={notif.isOpen} type={notif.type} title={notif.title} message={notif.message} onClose={() => setNotif({...notif, isOpen: false})} />

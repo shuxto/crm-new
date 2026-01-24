@@ -39,6 +39,10 @@ export function useLeads(filters: any, currentUserEmail?: string) {
     const { data: agentData } = await supabase.from('crm_users').select('id, real_name, role').in('role', ['conversion', 'retention', 'team_leader']).order('real_name', { ascending: true });
     if (agentData) setAgents(agentData);
 
+    // FIX: STABLE SORTING
+    // We sort by 'created_at' DESC first (Newest leads top).
+    // CRITICAL: We also sort by 'id' DESC as a tie-breaker. 
+    // This ensures that if you edit a lead, it DOES NOT jump around on refresh.
     let query = supabase.from('crm_leads')
         .select('*', { count: 'exact' }) 
         .order('created_at', { ascending: false })
@@ -90,9 +94,8 @@ export function useLeads(filters: any, currentUserEmail?: string) {
     fetchData();
     
     // --- QUOTA SAVER MODE ---
-    // Changed event from '*' to 'INSERT'.
-    // We now ONLY listen for NEW leads. Updates/Deletes are ignored to save messages.
-    // Why? Because 100 updates = 100 messages. 1 Insert = 1 message. This is 99% cheaper.
+    // Only listen for NEW leads (INSERT). 
+    // Updates/Deletes are ignored to prevent message explosion.
     const leadSub = supabase.channel('table-leads')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'crm_leads' }, (payload) => {
           setLeads(currentLeads => [payload.new as Lead, ...currentLeads]);
@@ -113,7 +116,8 @@ export function useLeads(filters: any, currentUserEmail?: string) {
     const lead = leads.find(l => l.id === leadId);
     const oldStatus = lead ? lead.status : null;
 
-    // Optimistic Update (Instant)
+    // Optimistic Update (Instant & In-Place)
+    // We use .map() so the lead stays at the EXACT same index.
     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus } : l));
     
     if (oldStatus && oldStatus !== newStatus) {

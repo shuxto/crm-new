@@ -9,8 +9,8 @@ interface Props {
   onManageLeader?: (leader: CRMUser) => void;
   onManagePerms?: (manager: CRMUser) => void;
   onPromoteTrading?: (user: CRMUser) => void;
-  onEditUser: (user: CRMUser) => void;     // <--- NEW
-  onChangeRole: (user: CRMUser) => void;   // <--- NEW
+  onEditUser: (user: CRMUser) => void;
+  onChangeRole: (user: CRMUser) => void;
 }
 
 export default function TeamTable({ 
@@ -32,8 +32,8 @@ export default function TeamTable({
           <tr>
             <th className="p-5">User</th>
             <th className="p-5">Role</th>
-            <th className="p-5">Platform</th>   {/* NEW COLUMN */}
-            <th className="p-5">Management</th> {/* NEW COLUMN */}
+            <th className="p-5">Platform</th>
+            <th className="p-5">Management</th>
             <th className="p-5">Details</th>
             <th className="p-5 text-right">Actions</th>
           </tr>
@@ -45,8 +45,16 @@ export default function TeamTable({
             filteredUsers.map(user => {
               const leader = allUsers.find(u => u.id === user.team_leader_id);
               const teamSize = allUsers.filter(u => u.team_leader_id === user.id).length;
-              const sourceStr = user.allowed_sources || ''; 
-              const folderCount = sourceStr ? sourceStr.split(',').length : 0;
+              
+              // --- FIX FOR CRASH: Handle Array vs String ---
+              const sourceData = user.allowed_sources;
+              let folderCount = 0;
+              if (Array.isArray(sourceData)) {
+                  folderCount = sourceData.length;
+              } else if (typeof sourceData === 'string' && sourceData) {
+                  folderCount = sourceData.split(',').filter(s => s.trim() !== '').length;
+              }
+              // ---------------------------------------------
               
               const roleStyles: Record<string, string> = {
                 admin: 'bg-red-500/10 text-red-400 border-red-500/20',
@@ -80,7 +88,7 @@ export default function TeamTable({
                     </span>
                   </td>
 
-                  {/* 3. PLATFORM (New) */}
+                  {/* 3. PLATFORM */}
                   <td className="p-5">
                     {['admin', 'manager', 'compliance'].includes(user.role) ? (
                         user.is_synced ? (
@@ -97,7 +105,7 @@ export default function TeamTable({
                     )}
                   </td>
 
-                  {/* 4. MANAGEMENT (New: Access / Team) */}
+                  {/* 4. MANAGEMENT */}
                   <td className="p-5">
                     {user.role === 'team_leader' && (
                         <button onClick={() => onManageLeader?.(user)} className="flex items-center gap-2 bg-cyan-900/30 hover:bg-cyan-600 text-cyan-400 hover:text-white px-3 py-1.5 rounded-lg text-xs font-bold transition border border-cyan-500/30 hover:border-cyan-500 shadow-lg shadow-cyan-900/10">
@@ -112,7 +120,7 @@ export default function TeamTable({
                     {!['team_leader', 'manager'].includes(user.role) && <span className="text-gray-600 text-xs">-</span>}
                   </td>
 
-                  {/* 5. DETAILS (Stats) */}
+                  {/* 5. DETAILS */}
                   <td className="p-5">
                     {user.role === 'team_leader' ? (
                       <div className="text-white font-bold flex items-center gap-1"><Users size={14} className="text-cyan-500"/> {teamSize} <span className="text-gray-500 font-normal text-xs">Agents</span></div>
@@ -123,7 +131,7 @@ export default function TeamTable({
                     ) : (<span className="text-gray-600 text-xs">-</span>)}
                   </td>
 
-                  {/* 6. ACTIONS (Edit / Promote / Delete) */}
+                  {/* 6. ACTIONS */}
                   <td className="p-5 text-right">
                     <div className="flex justify-end gap-2 items-center">
                       <button onClick={() => onEditUser(user)} className="text-gray-500 hover:text-blue-400 transition p-2 hover:bg-blue-500/10 rounded-lg cursor-pointer" title="Edit User">

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Bell, Check, Trash2, ExternalLink, MessageCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { useNavigate } from 'react-router-dom'; // <--- REQUIRED FOR CHAT NAVIGATION
+import { useNavigate } from 'react-router-dom';
 
 interface Notification {
   id: string;
@@ -23,7 +23,7 @@ export default function NotificationBell({ userId }: { userId: string }) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   
-  const navigate = useNavigate(); // <--- Hook to change pages
+  const navigate = useNavigate();
 
   // 1. Fetch & Subscribe
   useEffect(() => {
@@ -117,15 +117,17 @@ export default function NotificationBell({ userId }: { userId: string }) {
     await supabase.from('crm_notifications').delete().eq('id', id);
   };
 
-  // --- FIXED: HANDLE NOTIFICATION CLICK (Chat vs Lead) ---
+  // FIX 1: Ensure redirect logic covers tags
   const handleNotifClick = (n: Notification) => {
       if (n.related_lead_id) {
-          // CHECK: Is this a Chat Notification? (Based on title from SQL Trigger)
-          if (n.title.toLowerCase().includes('tagged') || n.title.toLowerCase().includes('mentioned')) {
-              // Navigate to Chat Page with Room ID
+          // Check for Chat Notifications
+          const titleLower = n.title.toLowerCase();
+          
+          if (titleLower.includes('tagged') || titleLower.includes('mentioned') || titleLower.includes('message')) {
+              // Redirect to Chat Page
               navigate(`/chat?room_id=${n.related_lead_id}`);
           } else {
-              // It is a CRM Lead -> Open Lead Modal
+              // Open CRM Lead Modal
               window.dispatchEvent(new CustomEvent('crm-open-lead-id', { detail: n.related_lead_id }));
           }
           
@@ -136,7 +138,6 @@ export default function NotificationBell({ userId }: { userId: string }) {
 
   return (
     <>
-      {/* BELL BUTTON */}
       <button 
         ref={buttonRef}
         onClick={toggleOpen}
@@ -150,7 +151,6 @@ export default function NotificationBell({ userId }: { userId: string }) {
         )}
       </button>
 
-      {/* DROPDOWN MENU */}
       {isOpen && createPortal(
         <div 
             ref={dropdownRef}
@@ -162,7 +162,6 @@ export default function NotificationBell({ userId }: { userId: string }) {
             }}
         >
           
-          {/* Header */}
           <div className="p-4 border-b border-white/10 flex justify-between items-center bg-white/5">
             <h3 className="text-sm font-bold text-white tracking-wide flex items-center gap-2">
                 <Bell size={14} className="text-blue-400" /> Notifications
@@ -174,7 +173,6 @@ export default function NotificationBell({ userId }: { userId: string }) {
             )}
           </div>
 
-          {/* List */}
           <div className="max-h-[60vh] overflow-y-auto custom-scrollbar">
             {notifications.length === 0 ? (
               <div className="p-12 text-center flex flex-col items-center gap-3">
@@ -195,15 +193,13 @@ export default function NotificationBell({ userId }: { userId: string }) {
                     `}
                 >
                   
-                  {/* Status Dot */}
                   <div className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${n.is_read ? 'bg-transparent border border-white/20' : 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]'}`} />
                   
                   <div className="flex-1 min-w-0 pr-6">
                     <h4 className={`text-xs font-bold mb-1 truncate ${n.is_read ? 'text-gray-400' : 'text-white'}`}>
                         {n.title}
-                        {/* Show Chat Icon if it's a mention, otherwise External Link */}
                         {n.related_lead_id && (
-                            n.title.toLowerCase().includes('tagged') 
+                            (n.title.toLowerCase().includes('tagged') || n.title.toLowerCase().includes('message'))
                             ? <MessageCircle size={10} className="inline ml-1.5 opacity-50" />
                             : <ExternalLink size={10} className="inline ml-1.5 opacity-50" />
                         )}
@@ -216,7 +212,6 @@ export default function NotificationBell({ userId }: { userId: string }) {
                     </span>
                   </div>
 
-                  {/* Hover Actions */}
                   <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2 top-2">
                     {!n.is_read && (
                       <button onClick={(e) => markAsRead(n.id, e)} className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500 hover:text-white transition" title="Mark Read">

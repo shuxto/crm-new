@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   LayoutDashboard, Users, Phone, 
   LogOut, Shield, Briefcase, 
@@ -7,7 +7,7 @@ import {
   MessageCircle 
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import NotificationBell from './NotificationBell'; 
 
 interface SidebarProps {
@@ -16,7 +16,7 @@ interface SidebarProps {
   isCollapsed: boolean; 
   onToggle: () => void; 
   onOpenBubble: () => void; 
-  activeBubbleRoom: string | null; // <--- NEW PROP
+  activeBubbleRoom: string | null; 
 }
 
 export default function Sidebar({ role, username, isCollapsed, onToggle, onOpenBubble, activeBubbleRoom }: SidebarProps) {
@@ -27,12 +27,21 @@ export default function Sidebar({ role, username, isCollapsed, onToggle, onOpenB
   const [unreadDM, setUnreadDM] = useState(0);
   const [myRooms, setMyRooms] = useState<Set<string>>(new Set());
 
+  const location = useLocation();
+  const locationRef = useRef(location);
+
+  useEffect(() => {
+    locationRef.current = location;
+  }, [location]);
+
   useEffect(() => {
     const init = async () => {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
             setUserId(user.id);
             fetchMyRooms(user.id);
+            // FIX 2: Fetch Offline Unread Counts
+            fetchUnreadCounts(user.id);
         }
     };
     init();
@@ -46,6 +55,23 @@ export default function Sidebar({ role, username, isCollapsed, onToggle, onOpenB
       }
   };
 
+  // FIX 2: Check for unread messages on login
+  const fetchUnreadCounts = async (uid: string) => {
+      // 1. Check Global Unread (If your DB supports tracking this)
+      // For now, we only trust DMs for persistent unread status to avoid complex "last read" logic for global
+      
+      // 2. Check DM Unread
+      // Counts messages where I am the receiver (or in the room) and read is false
+      const { count } = await supabase
+        .from('crm_messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('read', false)
+        .neq('sender_id', uid)
+        .neq('room_id', '00000000-0000-0000-0000-000000000000'); // Exclude global to keep it simple
+      
+      if (count) setUnreadDM(count);
+  };
+
   useEffect(() => {
       if (!userId) return;
 
@@ -54,23 +80,38 @@ export default function Sidebar({ role, username, isCollapsed, onToggle, onOpenB
               const newMsg = payload.new;
               if (newMsg.sender_id === userId) return;
 
-              // --- FIXED NOTIFICATION LOGIC ---
-              // If we are currently looking at this room in the bubble, DON'T ALERT
               if (newMsg.room_id === activeBubbleRoom) return;
 
-              if (newMsg.room_id === '00000000-0000-0000-0000-000000000000') {
-                  setUnreadGlobal(prev => prev + 1);
-              } else if (myRooms.has(newMsg.room_id)) {
+              const currentPath = locationRef.current.pathname;
+              const currentParams = new URLSearchParams(locationRef.current.search);
+              const currentChatRoom = currentParams.get('room_id');
+
+              if (currentPath === '/chat') {
+                  if (newMsg.room_id === '00000000-0000-0000-0000-000000000000') {
+                      if (!currentChatRoom || currentChatRoom === '00000000-0000-0000-0000-000000000000') return; 
+                      setUnreadGlobal(prev => prev + 1);
+                      return;
+                  }
+                  if (currentChatRoom === newMsg.room_id) return; 
+              } else {
+                  if (newMsg.room_id === '00000000-0000-0000-0000-000000000000') {
+                      setUnreadGlobal(prev => prev + 1);
+                      return;
+                  }
+              }
+
+              if (myRooms.has(newMsg.room_id)) {
                   setUnreadDM(prev => prev + 1);
               }
           })
           .subscribe();
 
       return () => { supabase.removeChannel(sub); };
-  }, [userId, myRooms, activeBubbleRoom]); // <--- Added activeBubbleRoom as dependency
+  }, [userId, myRooms, activeBubbleRoom]);
   
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    window.location.reload();
   };
 
   const clearGlobal = () => setUnreadGlobal(0);
@@ -187,7 +228,7 @@ export default function Sidebar({ role, username, isCollapsed, onToggle, onOpenB
           </nav>
 
           <div className={`mt-auto pt-6 border-t border-white/5 ${isCollapsed ? 'flex flex-col items-center' : ''}`}>
-             
+              
              <button 
                 onClick={clearDM} 
                 className={`mb-3 w-full bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition flex items-center justify-center relative ${isCollapsed ? 'p-2' : 'py-2 gap-2'}`}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
-import { Send, Users, Hash, Smile, MessageSquare, Search, Reply, X } from 'lucide-react';
+import { Send, Users, Hash, Smile, Search, Loader2 } from 'lucide-react';
 import EmojiPicker, { Theme } from 'emoji-picker-react'; 
 
 export default function ChatPage() {
@@ -13,11 +13,8 @@ export default function ChatPage() {
   
   const [newMessage, setNewMessage] = useState('');
   const [showPicker, setShowPicker] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   
-  // Reply State (Only affects Input, not the message look)
-  const [replyingTo, setReplyingTo] = useState<any | null>(null);
-  
-  // Tagging State
   const [showTagList, setShowTagList] = useState(false);
   const [tagQuery, setTagQuery] = useState('');
   const [mentionIds, setMentionIds] = useState<string[]>([]);
@@ -36,9 +33,20 @@ export default function ChatPage() {
     const roomId = params.get('room_id');
     if (roomId) {
         setActiveRoom(roomId);
-        window.history.replaceState({}, '', '/chat');
     }
   }, []);
+
+  // --- FIX: SYNC URL WITH ACTIVE ROOM ---
+  // This lets the Sidebar know exactly which room you are looking at
+  useEffect(() => {
+      const url = new URL(window.location.href);
+      if (activeRoom === '00000000-0000-0000-0000-000000000000') {
+          url.searchParams.delete('room_id');
+      } else {
+          url.searchParams.set('room_id', activeRoom);
+      }
+      window.history.replaceState({}, '', url);
+  }, [activeRoom]);
 
   useEffect(() => {
     fetchMessages();
@@ -55,7 +63,6 @@ export default function ChatPage() {
   }, [messages]);
 
   const fetchMessages = async () => {
-    // SIMPLIFIED QUERY: No complex joins, just the message and sender
     const { data } = await supabase.from('crm_messages')
         .select('*, sender:crm_users!sender_id(real_name)')
         .eq('room_id', activeRoom)
@@ -63,11 +70,15 @@ export default function ChatPage() {
     if(data) setMessages(data);
   };
 
-  // --- TAGGING LOGIC ---
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const val = e.target.value;
       setNewMessage(val);
       
+      if (activeRoom !== '00000000-0000-0000-0000-000000000000') {
+          setShowTagList(false);
+          return;
+      }
+
       const selectionStart = e.target.selectionStart;
       setCursorPosition(selectionStart);
 
@@ -110,21 +121,22 @@ export default function ChatPage() {
 
   const sendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!newMessage.trim() || !currentUser) return;
+    if (!newMessage.trim() || !currentUser || isSending) return;
+
+    setIsSending(true);
 
     await supabase.from('crm_messages').insert({
         room_id: activeRoom,
         sender_id: currentUser.id,
         content: newMessage,
         mentions: mentionIds,
-        // We still save the link in DB, but we don't show the ugly block
-        reply_to_id: replyingTo ? replyingTo.id : null 
+        reply_to_id: null 
     });
     
     setNewMessage('');
     setMentionIds([]);
-    setReplyingTo(null); 
     setShowPicker(false);
+    setIsSending(false); 
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -134,14 +146,12 @@ export default function ChatPage() {
     }
   };
 
-  // --- CLEAN RENDER (TAGS ONLY) ---
   const renderMessageContent = (content: string) => {
       if (!content) return null;
       const parts = content.split(/(@[\w\s]+)/g);
       
       return parts.map((part, index) => {
           if (part.startsWith('@')) {
-              // Simple pill style for tags
               return (
                   <span key={index} className="inline-block bg-blue-500/20 text-blue-300 px-1.5 rounded mx-0.5 text-xs font-bold border border-blue-500/30">
                       {part}
@@ -157,8 +167,6 @@ export default function ChatPage() {
 
   return (
     <div className="h-[calc(100vh-2rem)] flex gap-4">
-        
-        {/* LEFT SIDEBAR */}
         <div className="w-72 bg-black/20 border border-white/5 rounded-3xl p-4 hidden md:flex flex-col">
             <h2 className="text-xl font-bold text-white mb-4 px-2">Chats</h2>
             <div 
@@ -200,15 +208,12 @@ export default function ChatPage() {
                             <p className="text-gray-300 text-sm font-medium truncate group-hover:text-white">{user.real_name}</p>
                             <p className="text-[10px] text-gray-600 truncate capitalize">{user.role}</p>
                         </div>
-                        <MessageSquare size={14} className="text-gray-600 group-hover:text-blue-400 opacity-0 group-hover:opacity-100" />
                     </div>
                 ))}
             </div>
         </div>
 
-        {/* CHAT AREA */}
         <div className="flex-1 bg-black/40 border border-white/10 rounded-3xl flex flex-col overflow-hidden relative shadow-2xl">
-            {/* Header */}
             <div className="h-16 border-b border-white/5 flex items-center px-6 bg-white/5 justify-between shrink-0">
                 <div className="flex items-center gap-3">
                     {activeRoomName.includes('Global') ? <Hash className="text-blue-400" /> : <Users className="text-green-400" />}
@@ -216,7 +221,6 @@ export default function ChatPage() {
                 </div>
             </div>
 
-            {/* Messages */}
             <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
                 {messages.map((msg, i) => {
                     const isMe = msg.sender_id === currentUser?.id;
@@ -225,21 +229,14 @@ export default function ChatPage() {
 
                     return (
                         <div key={msg.id} className={`flex flex-col group ${isMe ? 'items-end' : 'items-start'}`}>
-                             
                              <div className={`flex gap-3 max-w-[70%] ${isMe ? 'flex-row-reverse' : ''}`}>
-                                {/* Avatar */}
                                 <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-xs font-bold ${isMe ? 'bg-indigo-500 text-white' : 'bg-gray-700 text-gray-300'} ${!showAvatar ? 'opacity-0' : ''}`}>
                                     {msg.sender?.real_name?.substring(0,2).toUpperCase()}
                                 </div>
-                                
-                                <div className={`flex flex-col ${isMe ? 'items-end' : ''}`}>
-                                    
-                                    {/* Sender Name */}
+                                <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                                     {showAvatar && !isMe && <span className="text-[10px] text-gray-400 ml-1 mb-1">{msg.sender?.real_name}</span>}
-                                    
-                                    {/* MESSAGE BUBBLE (Clean, no weird blocks on top) */}
                                     <div className={`
-                                        px-4 py-2 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap relative
+                                        px-4 py-2 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap
                                         ${isMe 
                                             ? 'bg-indigo-600 text-white rounded-tr-none' 
                                             : (isMentioned 
@@ -248,23 +245,7 @@ export default function ChatPage() {
                                         }
                                     `}>
                                         {renderMessageContent(msg.content)}
-                                        
-                                        {/* REPLY BUTTON (Visible ONLY on Hover) */}
-                                        <button 
-                                            onClick={() => {
-                                                setReplyingTo(msg);
-                                                if(inputRef.current) inputRef.current.focus();
-                                            }}
-                                            className={`
-                                                absolute -top-3 p-1 rounded-full bg-gray-700 text-white shadow-md opacity-0 group-hover:opacity-100 transition-opacity
-                                                ${isMe ? '-left-8' : '-right-8'}
-                                            `}
-                                            title="Reply to this message"
-                                        >
-                                            <Reply size={12} />
-                                        </button>
                                     </div>
-
                                     <span className="text-[9px] text-gray-600 px-1 opacity-50 mt-1">
                                         {new Date(msg.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
                                     </span>
@@ -277,19 +258,6 @@ export default function ChatPage() {
             </div>
 
             <div className="p-4 bg-white/5 border-t border-white/5 relative">
-                
-                {/* --- REPLY BANNER (This ONLY appears above Input) --- */}
-                {replyingTo && (
-                    <div className="flex items-center justify-between bg-black/40 border border-white/10 rounded-t-xl px-4 py-2 text-xs text-gray-300 -mb-px mx-1">
-                        <div className="flex items-center gap-2">
-                            <Reply size={14} className="text-blue-400" />
-                            <span>Replying to <strong className="text-white">{replyingTo.sender?.real_name}</strong></span>
-                        </div>
-                        <button onClick={() => setReplyingTo(null)} className="hover:text-white"><X size={14} /></button>
-                    </div>
-                )}
-
-                {/* --- TAG SUGGESTION POPUP --- */}
                 {showTagList && filteredTags.length > 0 && (
                     <div className="absolute bottom-20 left-14 bg-crm-bg/95 backdrop-blur-xl border border-white/20 rounded-xl shadow-[0_0_30px_rgba(0,0,0,0.5)] w-56 overflow-hidden z-50 animate-in slide-in-from-bottom-2">
                         <div className="px-3 py-2 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-white/10">Suggestions</div>
@@ -321,7 +289,7 @@ export default function ChatPage() {
                     
                     <textarea 
                         ref={inputRef}
-                        className={`w-full bg-black/40 border border-white/10 rounded-xl py-3 pl-4 pr-12 text-white focus:border-indigo-500 outline-none transition shadow-inner resize-none custom-scrollbar ${replyingTo ? 'rounded-tl-none rounded-tr-none border-t-0' : ''}`}
+                        className="w-full bg-black/40 border border-white/10 rounded-xl py-3 pl-4 pr-12 text-white focus:border-indigo-500 outline-none transition shadow-inner resize-none custom-scrollbar"
                         placeholder={`Message ${activeRoomName}...`}
                         value={newMessage}
                         onChange={handleInputChange} 
@@ -330,8 +298,12 @@ export default function ChatPage() {
                         style={{ minHeight: '46px', maxHeight: '120px' }}
                     />
 
-                    <button onClick={(e) => { e.preventDefault(); sendMessage(); }} className="p-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition shadow-lg shadow-indigo-500/20">
-                        <Send size={20} />
+                    <button 
+                        onClick={(e) => { e.preventDefault(); sendMessage(); }} 
+                        disabled={isSending || !newMessage.trim()}
+                        className="p-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-xl transition shadow-lg shadow-indigo-500/20"
+                    >
+                        {isSending ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
                     </button>
                 </form>
             </div>

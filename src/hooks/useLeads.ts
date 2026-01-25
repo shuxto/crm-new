@@ -113,7 +113,9 @@ export function useLeads(filters: any, currentUserId?: string) {
       .subscribe();
       
     return () => { supabase.removeChannel(leadSub); };
-  }, [filters, currentUserId]); 
+    
+    // --- FIX APPLIED HERE: Using stringify to prevent infinite loops ---
+  }, [JSON.stringify(filters), currentUserId]); 
 
   // --- ACTIONS ---
   const updateLocalLead = (id: string, updates: Partial<Lead>) => {

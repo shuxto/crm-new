@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Check } from 'lucide-react';
+import { supabase } from '../../lib/supabase'; // <--- IMPORT SUPABASE
 import { type Lead } from '../../hooks/useLeads';
 
 interface StatusCellProps {
@@ -74,6 +75,37 @@ export default function StatusCell({ lead, options, onUpdate, role }: StatusCell
     };
   }, [isOpen]);
 
+  // --- NEW: LOGIC TO SEND ADMIN ALERTS ---
+  const checkAndSendAlert = async (newStatus: string) => {
+      const clean = newStatus.toLowerCase().replace(/\s/g, '');
+      const importantStatuses = ['upsale', 'ftd', 'transferred'];
+      
+      if (importantStatuses.some(s => clean.includes(s))) {
+          // 1. Get Current User (Who did it?)
+          const { data: { user } } = await supabase.auth.getUser();
+          if (!user) return;
+          
+          const { data: userData } = await supabase.from('crm_users').select('real_name').eq('id', user.id).single();
+          const actorName = userData?.real_name || 'Agent';
+
+          // 2. Get Admins & Managers
+          const { data: recipients } = await supabase.from('crm_users').select('id').in('role', ['admin', 'manager']);
+          if (!recipients || recipients.length === 0) return;
+
+          // 3. Send Notification with Clickable Link
+          const notifications = recipients.map(r => ({
+              user_id: r.id,
+              title: `🔥 Important: ${newStatus}`,
+              message: `${actorName} changed status to ${newStatus}. Click to view details.`,
+              related_lead_id: lead.id, // <--- Saves the ID for clicking
+              is_read: false
+          }));
+
+          await supabase.from('crm_notifications').insert(notifications);
+      }
+  };
+  // ----------------------------------------
+
   return (
     <>
       <button 
@@ -109,6 +141,14 @@ export default function StatusCell({ lead, options, onUpdate, role }: StatusCell
                 onClick={() => {
                   onUpdate(lead.id, opt.label);
                   setIsOpen(false);
+                  
+                  // --- TRIGGER NOTIFICATION (Toast) ---
+                  window.dispatchEvent(new CustomEvent('crm-toast', { 
+                    detail: { message: `Status updated to ${opt.label}`, type: 'success' } 
+                  }));
+
+                  // --- SEND ADMIN ALERT (Bell) ---
+                  checkAndSendAlert(opt.label);
                 }}
                 className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors text-left"
               >

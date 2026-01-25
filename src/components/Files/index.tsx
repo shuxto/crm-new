@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import Papa from 'papaparse';
-import * as XLSX from 'xlsx'; // <--- NEW: Import Excel Engine
+// REMOVED: import * as XLSX from 'xlsx'; <--- We removed this heavy import
 import { FileSpreadsheet, UploadCloud, Search, Trash2, Download, CheckCircle, Loader2, FolderOpen } from 'lucide-react';
 
 // --- TYPES ---
@@ -31,10 +31,10 @@ const validateHeaders = (headers: string[]) => {
 };
 
 // --- HELPER: UNIVERSAL FILE PARSER (CSV + EXCEL) ---
-const parseFile = (file: File): Promise<{ data: any[], fields: string[] }> => {
-  return new Promise((resolve, reject) => {
-    // A. CSV HANDLING (PapaParse)
-    if (file.name.endsWith('.csv')) {
+const parseFile = async (file: File): Promise<{ data: any[], fields: string[] }> => {
+  // A. CSV HANDLING (PapaParse is light, so we keep it as is)
+  if (file.name.endsWith('.csv')) {
+    return new Promise((resolve, reject) => {
       Papa.parse(file, {
         header: true,
         skipEmptyLines: true,
@@ -46,10 +46,15 @@ const parseFile = (file: File): Promise<{ data: any[], fields: string[] }> => {
         },
         error: (err) => reject(err)
       });
-      return;
-    }
+    });
+  }
 
-    // B. EXCEL HANDLING (SheetJS)
+  // B. EXCEL HANDLING (Dynamic Import)
+  // This line only runs if the file is NOT a CSV.
+  // It downloads the heavy XLSX library on demand.
+  const XLSX = await import('xlsx'); 
+
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
@@ -95,7 +100,7 @@ export default function FileManager() {
     setCheckResults(null);
 
     try {
-        const { data: rows } = await parseFile(file); // <--- Using Universal Parser
+        const { data: rows } = await parseFile(file); // <--- Updated to await
         
         let dupes = 0;
         let newLeads = 0;
@@ -140,7 +145,7 @@ export default function FileManager() {
     setStatusMsg('Analyzing Headers...');
     
     try {
-        const { data: rows, fields: headers } = await parseFile(file); // <--- Using Universal Parser
+        const { data: rows, fields: headers } = await parseFile(file); // <--- Updated to await
         const csvType = validateHeaders(headers);
 
         if (!csvType) {

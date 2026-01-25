@@ -95,7 +95,19 @@ export default function DistributeTab() {
                 return { agent_id: agentId, count: amount, folder: folderName };
             });
             
+            // 1. Move the leads
             await supabase.rpc('distribute_leads_bulk', { payload: folderPayload });
+
+            // 2. SEND NOTIFICATIONS TO AGENTS
+            const notifications = folderPayload.map((item: any) => ({
+                user_id: item.agent_id,
+                title: '🎁 New Leads Assigned',
+                message: `You have received ${item.count} new leads from folder "${folderName}". Good luck!`,
+                is_read: false
+            }));
+
+            // Don't await this strictly to keep UI fast
+            await supabase.from('crm_notifications').insert(notifications);
         }
         
         // SUCCESS: Close confirm, open success

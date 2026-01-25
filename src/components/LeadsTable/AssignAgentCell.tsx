@@ -30,7 +30,17 @@ export default function AssignAgentCell({ leadId, currentAgentId, agents, onUpda
   }, [isOpen]);
 
   const handleSelect = (agentId: string | null) => {
-    if (agentId !== currentAgentId) onUpdate(leadId, agentId);
+    if (agentId !== currentAgentId) {
+        onUpdate(leadId, agentId);
+        
+        // --- TRIGGER NOTIFICATION ---
+        const agentName = agents.find(a => a.id === agentId)?.real_name;
+        const msg = agentId ? `Assigned to ${agentName}` : 'Agent unassigned';
+        window.dispatchEvent(new CustomEvent('crm-toast', { 
+            detail: { message: msg, type: 'success' } 
+        }));
+        // ----------------------------
+    }
     setIsOpen(false);
     setSearchTerm('');
   };

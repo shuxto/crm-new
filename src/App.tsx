@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import { ShieldAlert } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
-import type { Lead } from './hooks/useLeads'; // <--- NEW IMPORT
+import type { Lead } from './hooks/useLeads'; 
 
 // COMPONENTS
 import LoginPage from './components/LoginPage';
@@ -23,8 +23,8 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   
-  // FIXED: Now TypeScript knows this is a Lead object, not random data
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false); // <--- NEW STATE
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -41,10 +41,26 @@ export default function App() {
       });
     });
 
-    return () => subscription.unsubscribe();
+    // Handle Custom Event for Opening Leads
+    const handleOpenLead = async (event: Event) => {
+        const e = event as CustomEvent; 
+        const leadId = e.detail;
+        if (!leadId) return;
+
+        const { data } = await supabase.from('crm_leads').select('*').eq('id', leadId).single();
+        if (data) {
+            setSelectedLead(data);
+        }
+    };
+    
+    window.addEventListener('crm-open-lead-id', handleOpenLead);
+
+    return () => { 
+        subscription.unsubscribe(); 
+        window.removeEventListener('crm-open-lead-id', handleOpenLead);
+    };
   }, []);
 
-  // FIXED: 'children' is now ReactNode, which is the correct type for nested components
   const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode, allowedRoles: string[] }) => {
     const role = session?.user?.user_metadata?.role || 'conversion';
     
@@ -61,7 +77,6 @@ export default function App() {
         </div>
       );
     }
-    // We must cast children to generic JSX to satisfy the return type safely
     return <>{children}</>;
   };
 
@@ -82,9 +97,21 @@ export default function App() {
     <BrowserRouter>
       <div className="flex min-h-screen font-sans text-[#e2e8f0]">
         <NotificationSystem />
-        <Sidebar role={currentRole} username={session.user.email || 'User'} />
+
+        <Sidebar 
+            role={currentRole} 
+            username={session.user.email || 'User'} 
+            isCollapsed={isSidebarCollapsed}
+            onToggle={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+        />
         
-        <main className="flex-1 p-6 relative z-10 overflow-y-auto h-screen">
+        {/* --- FIXED MARGIN LOGIC HERE --- */}
+        <main 
+            className={`
+                flex-1 p-6 relative z-10 overflow-y-auto h-screen transition-all duration-300
+                ${isSidebarCollapsed ? 'md:ml-20' : 'md:ml-64'} 
+            `}
+        >
           <Routes>
             <Route path="/" element={
               <Dashboard session={session} onLeadClick={setSelectedLead} />

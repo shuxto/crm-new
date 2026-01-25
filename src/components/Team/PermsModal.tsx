@@ -40,10 +40,12 @@ export default function PermsModal({ manager, folders, onClose, onSuccess }: Pro
 
   const filteredFolders = folders.filter(f => f.toLowerCase().includes(search.toLowerCase()));
 
-  // 2. SAVE AS ARRAY
+  // 2. SAVE AS ARRAY (CORRECTED)
   const handleSave = async () => {
     setSaving(true);
     
+    // FIX: Send 'selectedFolders' directly as an array.
+    // The DB is text[], so sending a string like "" causes the "malformed array literal" error.
     const { error } = await supabase.from('crm_users')
       .update({ allowed_sources: selectedFolders }) 
       .eq('id', manager.id);
@@ -52,29 +54,11 @@ export default function PermsModal({ manager, folders, onClose, onSuccess }: Pro
     
     if (error) {
         console.error("Permission Save Error:", error);
-        // Fallback for older DB types
-        if (error.code === '42804' || error.message.includes('array')) {
-             alert("Database Type Mismatch. Trying fallback...");
-             await handleSaveAsString();
-             return;
-        }
         alert(`Error saving permissions: ${error.message}`);
     } else {
         window.dispatchEvent(new CustomEvent('crm-toast', { detail: { message: `Permissions updated`, type: 'success' } }));
         onSuccess();
     }
-  };
-
-  const handleSaveAsString = async () => {
-      const { error } = await supabase.from('crm_users')
-        .update({ allowed_sources: selectedFolders.join(',') }) 
-        .eq('id', manager.id);
-      
-      if (!error) {
-          onSuccess();
-      } else {
-          alert("Failed to save permissions.");
-      }
   };
 
   const toggleFolder = (folder: string) => {

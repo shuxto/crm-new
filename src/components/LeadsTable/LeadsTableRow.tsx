@@ -9,25 +9,17 @@ interface LeadsTableRowProps {
   lead: Lead;
   isSelected: boolean;
   isVanishing: boolean;
-  // role: string; <--- REMOVED (Not needed here)
-  
-  // Feature Flags (Calculated by parent based on role)
+  role: string;
   showCheckbox: boolean;
   showAssign: boolean;
   showDelete: boolean;
-  
-  // Data
   statusOptions: any[];
   agents: any[];
-  
-  // Actions
   toggleSelectOne: (id: string) => void;
   onLeadClick: (lead: Lead) => void;
   setKycLead: (lead: Lead) => void;
   setActiveNoteLead: (lead: Lead) => void;
   handleDeleteClick: (lead: Lead) => void;
-  
-  // Logic Handlers
   onStatusUpdateInterceptor: (id: string, newStatus: string) => void;
   updateLeadAgent: (id: string, agentId: string | null) => void;
   rowIndex: number;
@@ -35,7 +27,7 @@ interface LeadsTableRowProps {
 }
 
 export default function LeadsTableRow({
-  lead, isSelected, isVanishing,
+  lead, isSelected, isVanishing, role,
   showCheckbox, showAssign, showDelete,
   statusOptions, agents,
   toggleSelectOne, onLeadClick, setKycLead, setActiveNoteLead, handleDeleteClick,
@@ -44,16 +36,11 @@ export default function LeadsTableRow({
   
   const [isCalling, setIsCalling] = useState(false);
 
-  // HANDLE QUICK CALL
   const handleQuickCall = async (e: React.MouseEvent) => {
-    e.stopPropagation(); // Stop row click
+    e.stopPropagation();
     if (!lead.phone || isCalling) return;
-    
     setIsCalling(true);
-    // Trigger the system
     await initiateCall(lead.id, lead.phone);
-    
-    // Reset after 2 seconds
     setTimeout(() => setIsCalling(false), 2000);
   };
 
@@ -71,6 +58,7 @@ export default function LeadsTableRow({
             type="checkbox" 
             checked={isSelected} 
             onChange={() => toggleSelectOne(lead.id)} 
+            // 1. ADDED POINTER
             className="cursor-pointer accent-cyan-500" 
           />
         </td>
@@ -97,14 +85,14 @@ export default function LeadsTableRow({
 
       <td className="p-4">
         <div className="flex flex-col gap-1">
-          {/* UPDATED PHONE ROW WITH BUTTON */}
           <div className="flex items-center gap-2">
             <button 
                onClick={handleQuickCall}
                disabled={isCalling}
-               className={`p-1.5 rounded-lg transition-all border ${
+               // 2. ADDED POINTER
+               className={`p-1.5 rounded-lg transition-all border cursor-pointer ${
                  isCalling 
-                   ? 'bg-green-500/20 text-green-400 border-green-500/30' 
+                   ? 'bg-green-500/20 text-green-400 border-green-500/30 cursor-not-allowed' 
                    : 'bg-blue-500/10 text-blue-400 border-blue-500/20 hover:bg-blue-500/20 hover:scale-105'
                }`}
                title="Call Now"
@@ -124,7 +112,12 @@ export default function LeadsTableRow({
       </td>
 
       <td className="p-4 text-center align-middle">
-          <button onClick={() => setKycLead(lead)} className="transition transform hover:scale-110 active:scale-95" title="Manage KYC">
+          <button 
+            onClick={() => setKycLead(lead)} 
+            // 3. ADDED POINTER
+            className="transition transform hover:scale-110 active:scale-95 cursor-pointer" 
+            title="Manage KYC"
+          >
               {lead.kyc_status === 'Approved' ? <ShieldCheck size={18} className="text-green-400 mx-auto drop-shadow-[0_0_8px_rgba(74,222,128,0.5)]" /> 
               : lead.kyc_status === 'Pending' ? <Shield size={18} className="text-yellow-400 mx-auto drop-shadow-[0_0_8px_rgba(250,204,21,0.5)]" /> 
               : <ShieldAlert size={18} className="text-gray-600 mx-auto hover:text-gray-400" />}
@@ -133,12 +126,10 @@ export default function LeadsTableRow({
       
       <td className="p-4 align-middle">
           <StatusCell 
-              currentStatus={lead.status} 
-              leadId={lead.id} 
+              lead={lead} 
               options={statusOptions} 
               onUpdate={onStatusUpdateInterceptor} 
-              rowIndex={rowIndex} 
-              totalRows={totalRows} 
+              role={role} 
           />
       </td>
 
@@ -156,20 +147,32 @@ export default function LeadsTableRow({
       )}
       
       <td className="p-4 text-center">
-          <button onClick={() => setActiveNoteLead(lead)} className={`transition p-2 rounded-lg hover:bg-white/5 ${(lead.note_count || 0) > 0 ? 'text-blue-400 drop-shadow-[0_0_8px_rgba(96,165,250,0.5)]' : 'text-gray-600'}`}>
+          <button 
+            onClick={() => setActiveNoteLead(lead)} 
+            // 4. ADDED POINTER
+            className={`transition p-2 rounded-lg hover:bg-white/5 cursor-pointer ${(lead.note_count || 0) > 0 ? 'text-blue-400 drop-shadow-[0_0_8px_rgba(96,165,250,0.5)]' : 'text-gray-600'}`}
+          >
               <MessageSquare size={16} />
           </button>
       </td>
 
       <td className="p-4 text-center">
-        <button onClick={() => onLeadClick(lead)} className="p-1.5 bg-blue-600/10 text-blue-400 border border-blue-500/30 hover:bg-blue-600 hover:text-white rounded-lg transition-all shadow-lg shadow-blue-500/10">
+        <button 
+            onClick={() => onLeadClick(lead)} 
+            // 5. ADDED POINTER
+            className="p-1.5 bg-blue-600/10 text-blue-400 border border-blue-500/30 hover:bg-blue-600 hover:text-white rounded-lg transition-all shadow-lg shadow-blue-500/10 cursor-pointer"
+        >
           <Eye size={14} />
         </button>
       </td>
       
       {showDelete && (
         <td className="p-4 text-center">
-          <button onClick={() => handleDeleteClick(lead)} className="text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition p-1.5 rounded-lg">
+          <button 
+            onClick={() => handleDeleteClick(lead)} 
+            // 6. ADDED POINTER
+            className="text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition p-1.5 rounded-lg cursor-pointer"
+          >
             <Trash2 size={14} />
           </button>
         </td>

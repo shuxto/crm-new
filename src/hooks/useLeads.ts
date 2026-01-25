@@ -22,7 +22,6 @@ export interface Agent {
   role: string;
 }
 
-// CHANGED: Now accepts 'currentUserId' (UUID), not Email
 export function useLeads(filters: any, currentUserId?: string) {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [totalCount, setTotalCount] = useState(0); 
@@ -68,13 +67,19 @@ export function useLeads(filters: any, currentUserId?: string) {
         if (filters.source?.length > 0) query = query.in('source_file', filters.source);
         if (filters.country?.length > 0) query = query.in('country', filters.country);
         
-        // --- FIXED LOGIC ---
+        // --- 1. PRO FIX: STRICT LOGIC ---
         if (filters.tab === 'unassigned') {
             query = query.is('assigned_to', null);
         } 
-        else if (filters.tab === 'mine' && currentUserId) {
-            // FIXED: Use .eq() with UUID, not .ilike()
-            query = query.eq('assigned_to', currentUserId); 
+        else if (filters.tab === 'mine') {
+            if (currentUserId) {
+                // Happy Path: We have the ID, fetch their leads
+                query = query.eq('assigned_to', currentUserId); 
+            } else {
+                // SECURITY FALLBACK: User wants "Mine" but ID isn't ready.
+                // Fetch NOTHING. (Prevents the "Flash of All Leads")
+                query = query.eq('id', '00000000-0000-0000-0000-000000000000');
+            }
         } 
     }
 
@@ -108,9 +113,9 @@ export function useLeads(filters: any, currentUserId?: string) {
       .subscribe();
       
     return () => { supabase.removeChannel(leadSub); };
-  }, [filters, currentUserId]); // Added currentUserId dependency
+  }, [filters, currentUserId]); 
 
-  // --- ACTIONS (Unchanged) ---
+  // --- ACTIONS ---
   const updateLocalLead = (id: string, updates: Partial<Lead>) => {
     setLeads(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l));
   };

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
-import { supabase } from '../../lib/supabase'; // IMPORT SUPABASE
+import { supabase } from '../../lib/supabase';
 import { useLeads, type Lead } from '../../hooks/useLeads'; 
 import KYCModal from './KYCModal'; 
 import ConfirmationModal from '../Team/ConfirmationModal'; 
@@ -21,7 +21,6 @@ type ActionType = 'transfer' | 'ftd' | 'upsale';
 
 export default function LeadsTable({ role = 'admin', filters, onLeadClick, currentUserEmail, onPageChange }: LeadsTableProps) {
   
-  // 1. FETCH CURRENT USER ID (UUID)
   const [currentUserId, setCurrentUserId] = useState<string | undefined>(undefined);
 
   useEffect(() => {
@@ -30,7 +29,6 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
     });
   }, []);
 
-  // 2. PASS ID TO HOOK (Fixed)
   const { 
     leads, totalCount, statusOptions, agents, loading, 
     updateLeadStatus, updateLeadAgent, deleteLead,
@@ -38,33 +36,25 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
     updateLocalLead 
   } = useLeads(filters, currentUserId);
   
-  // ... (Rest of the UI code is fine, no changes needed below this line) ...
-  // ... Just copy the rest from your previous file or what I sent before ...
-  
-  // UI State
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   
-  // Modal State
   const [kycLead, setKycLead] = useState<Lead | null>(null);
   const [activeNoteLead, setActiveNoteLead] = useState<Lead | null>(null);
   const [leadToDelete, setLeadToDelete] = useState<Lead | null>(null);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // New Protocol State
   const [pendingAction, setPendingAction] = useState<{ type: ActionType, id: string, name: string } | null>(null);
-  const [vanishingIds, setVanishingIds] = useState<string[]>([]);
+  const [vanishingIds] = useState<string[]>([]);
   const [overlayMode, setOverlayMode] = useState<OverlayMode | null>(null);
 
-  // Role Checks
   const isAdmin = role === 'admin';
   const isManager = role === 'manager';
   const showCheckbox = isAdmin || isManager;
   const showAssign = isAdmin || isManager;
   const showDelete = isAdmin || isManager;
 
-  // Pagination
   const currentPage = filters?.page || 1;
   const limit = filters?.limit || 50;
   const totalPages = Math.ceil((totalCount || 0) / limit);
@@ -75,7 +65,7 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
     const lead = leads.find(l => l.id === id);
     const name = lead ? `${lead.name} ${lead.surname}` : 'this lead';
 
-    if (newStatus === 'Transfered') {
+    if (newStatus === 'Transferred' || newStatus === 'Transfered') {
       setPendingAction({ type: 'transfer', id, name });
       return; 
     }
@@ -97,10 +87,8 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
     setOverlayMode(type); 
 
     if (type === 'transfer') {
-        setVanishingIds(prev => [...prev, id]); 
         setTimeout(async () => {
-            await updateLeadStatus(id, 'Transfered');
-            await updateLeadAgent(id, null);
+            await updateLeadStatus(id, 'Transferred');
         }, 800);
     } else if (type === 'ftd') {
         await updateLeadStatus(id, 'FTD');
@@ -112,7 +100,6 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
   const toggleSelectAll = () => selectedIds.length === leads.length ? setSelectedIds([]) : setSelectedIds(leads.map(l => l.id));
   const toggleSelectOne = (id: string) => selectedIds.includes(id) ? setSelectedIds(selectedIds.filter(i => i !== id)) : setSelectedIds([...selectedIds, id]);
 
-  // Bulk Handlers
   const handleBulkAssign = async (agentId: string | null) => {
     setIsProcessing(true);
     await bulkUpdateAgent(selectedIds, agentId);
@@ -150,12 +137,11 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
     document.body.removeChild(link);
   };
 
-  // Helper for Modal Props
   const getModalProps = () => {
     if (!pendingAction) return { title: '', message: '', type: 'danger' as const };
     if (pendingAction.type === 'transfer') return {
         title: '⚠️ ASSET RELOCATION PROTOCOL',
-        message: `WARNING: You are about to TRANSFER ${pendingAction.name}. \n\nBy confirming, you voluntarily SURRENDER all rights to this lead. It will be immediately unassigned and removed from your dashboard.`,
+        message: `WARNING: You are about to TRANSFER ${pendingAction.name}. \n\nConfirming this will mark the lead as Transferred.`,
         type: 'danger' as const
     };
     if (pendingAction.type === 'ftd') return {
@@ -204,6 +190,7 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
                 lead={lead}
                 isSelected={selectedIds.includes(lead.id)}
                 isVanishing={vanishingIds.includes(lead.id)}
+                role={role} // <--- PASSING ROLE HERE
                 showCheckbox={showCheckbox}
                 showAssign={showAssign}
                 showDelete={showDelete}
@@ -247,7 +234,6 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
         onBulkDeleteStart={() => setShowBulkDeleteConfirm(true)}
       />
 
-      {/* MODALS */}
       {kycLead && <KYCModal leadId={kycLead.id} leadName={`${kycLead.name} ${kycLead.surname}`} phone={kycLead.phone} email={kycLead.email} currentStatus={kycLead.kyc_status} onClose={() => setKycLead(null)} onUpdateStatus={() => {}} />}
       
       {activeNoteLead && <NotesSidebar lead={activeNoteLead} onClose={() => setActiveNoteLead(null)} currentUserEmail={currentUserEmail} role={role} onNoteCountChange={(count) => {

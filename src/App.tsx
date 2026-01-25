@@ -20,7 +20,7 @@ export default function App() {
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   
-  // 1. NEW: Store the ID so we can pass it to the table
+  // 1. Store ID
   const [currentUserId, setCurrentUserId] = useState<string | undefined>(undefined);
 
   const [currentView, setCurrentView] = useState(() => {
@@ -33,6 +33,7 @@ export default function App() {
   
   const [selectedLead, setSelectedLead] = useState<any>(null);
   
+  // 2. DEFAULT IS 'mine' (Safety First)
   const [activeFilters, setActiveFilters] = useState({
       search: '',
       dateRange: 'all',
@@ -42,7 +43,7 @@ export default function App() {
       country: [] as string[],
       limit: 50,
       page: 1, 
-      tab: 'all' as 'all' | 'mine' | 'unassigned'
+      tab: 'mine' as 'all' | 'mine' | 'unassigned'
   });
 
   const toggleStatus = (status: string) => {
@@ -60,13 +61,21 @@ export default function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session) setCurrentUserId(session.user.id); // Store ID
+      if (session) {
+          setCurrentUserId(session.user.id);
+          
+          // 3. ADMIN AUTO-SWITCH to 'all'
+          const role = session.user.user_metadata?.role || 'conversion';
+          if (['admin', 'manager'].includes(role)) {
+              setActiveFilters(prev => ({ ...prev, tab: 'all' }));
+          }
+      }
       setLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if (session) setCurrentUserId(session.user.id); // Store ID
+      if (session) setCurrentUserId(session.user.id);
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -88,14 +97,9 @@ export default function App() {
     window.history.pushState({}, '', url);
   };
 
-  // 2. NEW: SECURITY GUARD (Prevents manual URL access)
   const renderProtectedView = (Component: React.ReactNode, allowedRoles: string[]) => {
-      // Use metadata for speed (avoids loading screen)
       const role = session?.user?.user_metadata?.role || 'conversion';
-
-      if (allowedRoles.includes(role)) {
-          return Component;
-      }
+      if (allowedRoles.includes(role)) return Component;
 
       return (
           <div className="h-full flex flex-col items-center justify-center p-10 text-center animate-in zoom-in-95">
@@ -127,7 +131,6 @@ export default function App() {
     );
   }
 
-  // Get role from metadata (Fast)
   const currentRole = session.user.user_metadata?.role || 'conversion';
 
   return (
@@ -146,9 +149,12 @@ export default function App() {
               </div>
             </header>
             
+            {/* 4. PASSING ROLE AND ID TO STATS GRID */}
             <StatsGrid 
               selectedStatuses={activeFilters.status} 
               onToggleStatus={toggleStatus} 
+              currentUserId={currentUserId}
+              role={currentRole}
             />
             
             <AdvancedFilter 
@@ -157,28 +163,21 @@ export default function App() {
               currentUserEmail={session.user.email}
             />
             
-            {/* 3. FIXED: We now pass the ID, not the email, so filters work */}
             <LeadsTable 
                 role={currentRole} 
                 filters={activeFilters} 
                 onLeadClick={(lead) => setSelectedLead(lead)} 
-                currentUserEmail={currentUserId} // <--- PASSING ID HERE
+                currentUserEmail={currentUserId} 
                 onPageChange={(newPage) => setActiveFilters(prev => ({ ...prev, page: newPage }))}
             />
           </div>
         )}
 
         {currentView === 'files' && renderProtectedView(<FileManager />, ['admin', 'manager'])}
-        
-        {/* PROTECTED ROUTES */}
         {currentView === 'team' && renderProtectedView(<TeamManagement />, ['admin', 'manager'])} 
-
         {currentView === 'shuffle' && renderProtectedView(<ShufflePage />, ['admin', 'manager', 'team_leader'])}
-
         {currentView === 'calls' && <CallsPage />}
-        
         {currentView === 'splitter' && renderProtectedView(<SplitterPage />, ['admin', 'manager'])}
-
       </main>
     </div>
   );

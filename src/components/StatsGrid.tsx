@@ -9,6 +9,8 @@ import {
 interface StatsGridProps {
   selectedStatuses: string[];
   onToggleStatus: (status: string) => void;
+  currentUserId?: string;
+  role?: string;
 }
 
 const getIconForLabel = (label: string) => {
@@ -29,6 +31,7 @@ const getIconForLabel = (label: string) => {
 };
 
 const hexToRgba = (hex: string, alpha: number) => {
+  if (!hex) return 'rgba(255,255,255,0.1)';
   hex = hex.replace('#', '');
   const r = parseInt(hex.substring(0, 2), 16);
   const g = parseInt(hex.substring(2, 4), 16);
@@ -36,74 +39,99 @@ const hexToRgba = (hex: string, alpha: number) => {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 };
 
-export default function StatsGrid({ selectedStatuses, onToggleStatus }: StatsGridProps) {
+export default function StatsGrid({ selectedStatuses, onToggleStatus, currentUserId, role }: StatsGridProps) {
   const [stats, setStats] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchData();
 
-    // 1. LISTEN FOR INSTANT UPDATES FROM TABLE (0ms Latency)
-    // This is SAFE. It happens only in your browser memory.
+    // Optimistic UI Update Logic
     const handleInstantUpdate = (e: any) => {
         const { oldStatus, newStatus } = e.detail;
-        
         setStats(currentStats => currentStats.map(stat => {
-            // Decrease Old Status Count
-            if (stat.label === oldStatus) {
-                return { ...stat, count: Math.max(0, stat.count - 1) };
+            
+            // Handle spelling variations for Real-time Update
+            const isTransferredStat = stat.label.includes('Transfer');
+            const isNewTransferred = newStatus.includes('Transfer');
+            const isOldTransferred = oldStatus?.includes('Transfer');
+
+            if (stat.label === oldStatus || (isTransferredStat && isOldTransferred)) {
+                 return { ...stat, count: Math.max(0, stat.count - 1) };
             }
-            // Increase New Status Count
-            if (stat.label === newStatus) {
-                return { ...stat, count: stat.count + 1 };
+            if (stat.label === newStatus || (isTransferredStat && isNewTransferred)) {
+                 return { ...stat, count: stat.count + 1 };
             }
             return stat;
         }));
     };
 
     window.addEventListener('crm-lead-update', handleInstantUpdate);
-
-    // 2. BACKUP: Realtime DB Subscription (Safety Net)
-    // ⚠️ DISABLED TO SAVE QUOTA (2M Messages Limit)
-    /* const statusSub = supabase.channel('grid-statuses').on('postgres_changes', { event: '*', schema: 'public', table: 'crm_statuses' }, fetchData).subscribe();
-    const leadsSub = supabase.channel('grid-leads').on('postgres_changes', { event: '*', schema: 'public', table: 'crm_leads' }, fetchData).subscribe();
-    */
-
-    return () => { 
-      window.removeEventListener('crm-lead-update', handleInstantUpdate);
-      // supabase.removeChannel(statusSub);
-      // supabase.removeChannel(leadsSub);
-    };
-  }, []);
+    return () => { window.removeEventListener('crm-lead-update', handleInstantUpdate); };
+  }, [currentUserId, role]); 
 
   async function fetchData() {
     try {
-      const { data: statusList, error: statusError } = await supabase
+      const { data: statusList } = await supabase
         .from('crm_statuses')
         .select('*')
         .eq('is_active', true)
         .order('order_index', { ascending: true });
 
-      if (statusError) throw statusError;
+      if (!statusList) return;
 
-      const { data: leadsData, error: leadsError } = await supabase
-        .from('crm_leads')
-        .select('status');
+      let query = supabase.from('crm_leads').select('status');
+
+      const isAdmin = ['admin', 'manager'].includes(role || '');
+      
+      // Filter by User ID if not admin
+      if (!isAdmin && currentUserId) {
+         query = query.eq('assigned_to', currentUserId);
+      } else if (!isAdmin && !currentUserId) {
+         // Security Fallback: If no ID, show nothing
+         query = query.eq('id', '00000000-0000-0000-0000-000000000000');
+      }
+
+      const { data: leadsData, error: leadsError } = await query;
 
       if (leadsError) throw leadsError;
 
+      // Count Logic
       const counts: Record<string, number> = {};
       leadsData?.forEach((lead) => {
-        const s = lead.status || 'New';
+        let s = lead.status || 'New';
+        // Normalize "Transfered" to "Transferred" just in case DB has old data
+        if (s === 'Transfered') s = 'Transferred'; 
         counts[s] = (counts[s] || 0) + 1;
       });
 
-      const finalStats = statusList.map((st) => ({
-        label: st.label,
-        count: counts[st.label] || 0,
-        color: st.hex_color,
-        Icon: getIconForLabel(st.label)
-      }));
+      // 1. FILTER: HIDE "UP SALE" AND "TRANSFERRED" FOR CONVERSION
+      const finalStats = statusList
+        .filter(st => {
+            const l = st.label.toLowerCase().replace(/\s/g, ''); 
+
+            if (role === 'conversion') {
+                // HIDE UP SALE
+                if (l.includes('upsale')) return false;
+                // HIDE TRANSFERRED (matches "Transferred", "Transfered", "Transfer")
+                if (l.includes('transfer')) return false; 
+            }
+            return true;
+        })
+        .map((st) => {
+            // Combine counts if needed
+            let count = counts[st.label] || 0;
+            if (st.label === 'Transferred' || st.label === 'Transfered') {
+                count = (counts['Transferred'] || 0) + (counts['Transfered'] || 0);
+            }
+
+            return {
+                label: st.label,
+                count: count,
+                color: st.hex_color,
+                Icon: getIconForLabel(st.label)
+            };
+        });
 
       setStats(finalStats);
     } catch (error) {
@@ -152,7 +180,6 @@ export default function StatsGrid({ selectedStatuses, onToggleStatus }: StatsGri
                 style={{ color: isActive ? '#fff' : color }}
                 className={`transition-transform duration-300 ${isActive ? 'scale-125 rotate-6' : 'group-hover:scale-125 group-hover:rotate-6'}`} 
               />
-              {/* ANIMATED COUNT */}
               <span className={`text-sm font-bold transition-all duration-300 ${isActive ? 'text-white' : 'text-white/80'}`}>
                 {stat.count}
               </span>

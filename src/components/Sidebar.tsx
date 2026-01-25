@@ -9,7 +9,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { NavLink, useLocation } from 'react-router-dom';
 import NotificationBell from './NotificationBell'; 
-import { GLOBAL_CHAT_ID } from '../constants'; // <--- Import Constant
+import { GLOBAL_CHAT_ID } from '../constants';
 
 interface SidebarProps {
   role: string;
@@ -56,65 +56,56 @@ export default function Sidebar({ role, username, isCollapsed, onToggle, onOpenB
   };
 
   const fetchUnreadCounts = async (uid: string) => {
-      const { count } = await supabase
+      // Robust Fetch: Get all unread messages and filter in JS
+      // This avoids 400 errors if the DB schema is slightly off regarding UUID types
+      const { data } = await supabase
         .from('crm_messages')
-        .select('*', { count: 'exact', head: true })
-        .eq('read', false)
-        .neq('sender_id', uid)
-        .neq('room_id', GLOBAL_CHAT_ID);
+        .select('sender_id, room_id') 
+        .eq('read', false);
       
-      if (count) setUnreadDM(count);
+      if (data) {
+          const validUnreads = data.filter(msg => 
+              msg.sender_id !== uid && 
+              msg.room_id !== GLOBAL_CHAT_ID
+          );
+          setUnreadDM(validUnreads.length);
+      }
   };
 
   useEffect(() => {
       if (!userId) return;
 
       const sub = supabase.channel('sidebar-notifications')
-          // A. LISTEN FOR NEW MESSAGES (INCREMENT COUNT)
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'crm_messages' }, (payload) => {
               const newMsg = payload.new;
-              if (newMsg.sender_id === userId) return; // Ignore my own messages
+              if (newMsg.sender_id === userId) return;
 
-              // CHECK 1: Am I looking at this room in the BUBBLE?
-              if (activeBubbleRoom === newMsg.room_id) {
-                  return;
-              }
+              if (activeBubbleRoom === newMsg.room_id) return;
 
-              // CHECK 2: Am I looking at this room in the FULL PAGE?
               const currentPath = window.location.pathname; 
               const currentParams = new URLSearchParams(window.location.search);
               const currentPageRoom = currentParams.get('room_id');
 
               if (currentPath === '/chat') {
-                  // If I'm on the chat page and looking at this specific room, ignore badge
                   if (currentPageRoom === newMsg.room_id) return;
-                  
-                  // If I'm on chat page looking at Global, and msg is Global, ignore badge
                   if ((!currentPageRoom || currentPageRoom === GLOBAL_CHAT_ID) && newMsg.room_id === GLOBAL_CHAT_ID) return;
               }
 
-              // Handle Global Chat Badge
               if (newMsg.room_id === GLOBAL_CHAT_ID) {
                   setUnreadGlobal(prev => prev + 1);
                   return;
               }
 
-              // Handle DM Badge
               if (myRooms.has(newMsg.room_id)) {
                   setUnreadDM(prev => prev + 1);
               } else if (newMsg.room_id !== GLOBAL_CHAT_ID) {
-                  // It's a DM room we didn't know about (brand new conversation)
                   setUnreadDM(prev => prev + 1);
                   setMyRooms(prev => new Set(prev).add(newMsg.room_id)); 
               }
           })
-          // B. LISTEN FOR READ STATUS UPDATES (DECREMENT COUNT) -- SYNC FIX
           .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'crm_messages' }, (payload) => {
-             // If a message NOT sent by me...
              if (payload.new.sender_id !== userId) {
-                 // ...changes from unread to read
                  if (payload.old.read === false && payload.new.read === true) {
-                     // Decrement local count safely
                      if (payload.new.room_id !== GLOBAL_CHAT_ID) {
                         setUnreadDM(prev => Math.max(0, prev - 1));
                      }

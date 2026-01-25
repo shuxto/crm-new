@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect, useMemo, useCallback } from 'react';
 import { MessageCircle, X, Send, Minus, ChevronLeft, Hash, Plus, Search, Loader2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useChat } from '../../hooks/useChat';
@@ -16,7 +16,6 @@ export default function ChatBubble({ currentUserId, onClose, onRoomChange }: Cha
   const [activeRoom, setActiveRoom] = useState<string>('');
   const [activeRoomName, setActiveRoomName] = useState('');
   
-  // The 'useChat' hook now handles the sorting perfectly!
   const { messages, loading: loadingMessages, sendMessage, isSending, loadMore, hasMore } = useChat(activeRoom, currentUserId);
 
   const [activeChats, setActiveChats] = useState<any[]>([]); 
@@ -24,6 +23,10 @@ export default function ChatBubble({ currentUserId, onClose, onRoomChange }: Cha
   const [newMessage, setNewMessage] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [unreadSenders, setUnreadSenders] = useState<Set<string>>(new Set());
+
+  // --- FIX: LOCAL MEMORY FOR READ MESSAGES ---
+  // If we read a message, we store the ID here so we ignore the DB if it's slow
+  const recentlyRead = useRef<Set<string>>(new Set());
 
   const [showTagList, setShowTagList] = useState(false);
   const [tagQuery, setTagQuery] = useState('');
@@ -35,70 +38,109 @@ export default function ChatBubble({ currentUserId, onClose, onRoomChange }: Cha
   const [openDirectionX, setOpenDirectionX] = useState<'left' | 'right'>('left');
   const [openDirectionY, setOpenDirectionY] = useState<'up' | 'down'>('up');
 
-  // --- SCROLL REFS ---
   const bubbleRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null); // New ref for the container
-  const prevMessagesLength = useRef(0); // New ref to track history loading
+  const scrollContainerRef = useRef<HTMLDivElement>(null); 
+  const prevMessagesLength = useRef(0); 
 
-  // --- SMART SCROLL LOGIC (Prevents Jumping) ---
   useLayoutEffect(() => {
     if (view !== 'chat' || !scrollContainerRef.current) return;
-
     const container = scrollContainerRef.current;
     const currentLen = messages.length;
     const prevLen = prevMessagesLength.current;
 
-    // 1. Initial Open or Room Change (0 -> N)
     if (prevLen === 0 && currentLen > 0) {
        messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
     }
-    // 2. New Message Received (Small increase) -> Scroll to bottom ONLY if near bottom
     else if (currentLen > prevLen && (currentLen - prevLen) < 5) {
        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
-       // Also scroll if I sent the message
        const lastMsg = messages[messages.length - 1];
        const isMe = lastMsg?.sender_id === currentUserId;
-
-       if (isNearBottom || isMe) {
-           messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-       }
+       if (isNearBottom || isMe) messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-    // 3. Loaded History (Large increase) -> DO NOTHING (Stay where you are)
-    
     prevMessagesLength.current = currentLen;
-  }, [messages, view]);
+  }, [messages, view, currentUserId]);
 
   useEffect(() => {
       onRoomChange(view === 'chat' ? activeRoom : null);
   }, [view, activeRoom]);
 
+  // --- 1. LOAD DATA ON OPEN ---
   useEffect(() => {
     if (!isOpen || view !== 'list') return;
     const fetchActiveChats = async () => {
-        const { data, error } = await supabase.rpc('get_my_active_dms', { p_user_id: currentUserId });
-        if (!error && data) setActiveChats(data);
+        try {
+            const { data, error } = await supabase.rpc('get_my_active_dms', { p_user_id: currentUserId });
+            if (!error && data) setActiveChats(data);
+        } catch (e) { console.error(e); }
     };
     fetchActiveChats();
+    
+    // FETCH UNREADS (With Filter)
+    const fetchUnreadSenders = async () => {
+        const { data } = await supabase.from('crm_messages')
+            .select('sender_id')
+            .eq('read', false)
+            .neq('sender_id', currentUserId)
+            .limit(100);
+            
+        if (data) {
+            // FILTER: Remove any IDs we know we've read locally
+            const realUnreads = new Set(data.map(d => d.sender_id));
+            recentlyRead.current.forEach(id => realUnreads.delete(id));
+            setUnreadSenders(realUnreads);
+        }
+    };
     fetchUnreadSenders();
   }, [isOpen, view]);
 
+  // --- 2. MARK AS READ (Auto trigger) ---
   useEffect(() => {
     if (view === 'chat' && activeRoom) markAsRead(activeRoom);
   }, [messages.length, view, activeRoom]);
 
-  const fetchUnreadSenders = async () => {
-      const { data } = await supabase.from('crm_messages').select('sender_id').eq('read', false).neq('sender_id', currentUserId).limit(500);
-      if (data) setUnreadSenders(new Set(data.map(d => d.sender_id)));
-  };
+  // --- 3. THE LOGIC FIX ---
+  const markAsRead = useCallback(async (roomId: string) => {
+      if (roomId === GLOBAL_CHAT_ID) return;
 
-  const markAsRead = async (roomId: string) => {
-      // Optimized: Only update if 'read' is actually false to save DB resources
-      await supabase.from('crm_messages')
-        .update({ read: true })
-        .eq('room_id', roomId)
-        .neq('sender_id', currentUserId)
-        .eq('read', false); 
+      // Find who we are talking to
+      const chat = activeChats.find(c => c.room_id === roomId);
+      const otherId = chat?.other_user_id;
+
+      // A. UPDATE LOCAL MEMORY (Instant)
+      if (otherId) {
+          recentlyRead.current.add(otherId); // Remember we read this!
+          
+          setUnreadSenders(prev => {
+              if (!prev.has(otherId)) return prev;
+              const next = new Set(prev);
+              next.delete(otherId);
+              return next;
+          });
+      }
+
+      // B. UPDATE DATABASE (Background)
+      try {
+          await supabase.from('crm_messages')
+            .update({ read: true })
+            .eq('room_id', roomId)
+            .neq('sender_id', currentUserId)
+            .eq('read', false); 
+      } catch (e) { /* ignore */ }
+  }, [activeChats, currentUserId]);
+
+  const handleChatClick = (roomId: string, name: string, otherUserId: string) => {
+      // Clear locally immediately before switching view
+      recentlyRead.current.add(otherUserId);
+      setUnreadSenders(prev => {
+          const next = new Set(prev);
+          next.delete(otherUserId);
+          return next;
+      });
+      
+      setActiveRoom(roomId);
+      setActiveRoomName(name);
+      setView('chat');
   };
 
   const fetchAllUsers = async () => {
@@ -161,8 +203,15 @@ export default function ChatBubble({ currentUserId, onClose, onRoomChange }: Cha
     setShowTagList(false);
   };
 
-  const filteredUsers = allUsers.filter(u => u.real_name.toLowerCase().includes(searchTerm.toLowerCase()));
-  const filteredTags = allUsers.filter(u => u.real_name.toLowerCase().startsWith(tagQuery.toLowerCase()));
+  const filteredUsers = useMemo(() => 
+    allUsers.filter(u => u.real_name.toLowerCase().includes(searchTerm.toLowerCase())),
+    [allUsers, searchTerm]
+  );
+  
+  const filteredTags = useMemo(() => 
+    allUsers.filter(u => u.real_name.toLowerCase().startsWith(tagQuery.toLowerCase())),
+    [allUsers, tagQuery]
+  );
 
   const windowStyle = {
       position: 'absolute' as const,
@@ -170,13 +219,48 @@ export default function ChatBubble({ currentUserId, onClose, onRoomChange }: Cha
       ...(openDirectionY === 'up' ? { bottom: 0 } : { top: 0 }),
   };
 
+  const messagesContent = useMemo(() => (
+    <div 
+        ref={scrollContainerRef} 
+        className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar bg-black/20"
+    >
+        {hasMore && !loadingMessages && (
+            <button onClick={loadMore} className="w-full text-center py-2 text-[9px] text-gray-500 hover:text-blue-400 transition uppercase font-bold tracking-tighter">↑ Load Previous</button>
+        )}
+        {loadingMessages ? (<div className="h-full flex items-center justify-center text-gray-500"><Loader2 size={24} className="animate-spin" /></div>) : (
+            <>
+                {messages.length === 0 && <div className="h-full flex items-center justify-center text-gray-600 text-xs italic">Say hello! 👋</div>}
+                {messages.map(msg => {
+                    const isMe = msg.sender_id === currentUserId;
+                    const isMentioned = msg.mentions && msg.mentions.includes(currentUserId);
+                    return (
+                        <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} animate-in slide-in-from-bottom-2 duration-300`}>
+                            <div className={`max-w-[85%] px-3 py-2 rounded-xl text-xs shadow-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : (isMentioned ? 'bg-yellow-500/20 border border-yellow-500 text-yellow-100' : 'bg-[#1e293b] text-gray-200 border border-white/5')} ${!isMe && !isMentioned ? 'rounded-bl-none' : 'rounded-xl'}`}>
+                                {!isMe && <span className="block text-[9px] text-blue-400 font-bold mb-0.5">{msg.sender?.real_name}</span>}
+                                {msg.content}
+                            </div>
+                            <span className="text-[9px] text-gray-600 mt-1 px-1">{new Date(msg.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                        </div>
+                    );
+                })}
+                <div ref={messagesEndRef} />
+            </>
+        )}
+    </div>
+  ), [messages, loadingMessages, hasMore, currentUserId, loadMore]);
+
   return (
-    <div ref={bubbleRef} style={{ top: position.y, left: position.x, position: 'fixed' }} className="z-100">
+    <div ref={bubbleRef} style={{ top: position.y, left: position.x, position: 'fixed' }} className="z-50">
       {!isOpen ? (
         <div className="relative group">
             <div onMouseDown={handleMouseDown} onClick={() => setIsOpen(true)} className="w-14 h-14 bg-blue-600 rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(37,99,235,0.5)] cursor-move hover:scale-110 transition-transform active:scale-95 border-2 border-white/20">
                 <MessageCircle size={24} className="text-white" />
             </div>
+            {unreadSenders.size > 0 && (
+                <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center text-white text-xs font-bold border-2 border-crm-bg">
+                    {unreadSenders.size}
+                </span>
+            )}
             <button onClick={(e) => { e.stopPropagation(); onClose(); }} className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer shadow-lg"><X size={10} /></button>
         </div>
       ) : (
@@ -204,7 +288,7 @@ export default function ChatBubble({ currentUserId, onClose, onRoomChange }: Cha
                             {activeChats.map(chat => {
                                 const hasUnread = unreadSenders.has(chat.other_user_id);
                                 return (
-                                    <div key={chat.room_id} onClick={() => { setActiveRoom(chat.room_id); setActiveRoomName(chat.other_user_name); setView('chat'); }} className={`p-2 rounded-lg flex items-center gap-3 cursor-pointer group transition ${hasUnread ? 'bg-blue-600/20 border border-blue-500/30' : 'hover:bg-white/5'}`}>
+                                    <div key={chat.room_id} onClick={() => handleChatClick(chat.room_id, chat.other_user_name, chat.other_user_id)} className={`p-2 rounded-lg flex items-center gap-3 cursor-pointer group transition ${hasUnread ? 'bg-blue-600/20 border border-blue-500/30' : 'hover:bg-white/5'}`}>
                                         <div className="relative">
                                             <div className="w-8 h-8 bg-gray-700 rounded-lg flex items-center justify-center text-[10px] text-white font-bold group-hover:bg-gray-600 transition">{chat.other_user_name.substring(0,2).toUpperCase()}</div>
                                             {hasUnread && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-blue-500 rounded-full border border-black shadow-md animate-pulse"></span>}
@@ -240,33 +324,8 @@ export default function ChatBubble({ currentUserId, onClose, onRoomChange }: Cha
 
                 {view === 'chat' && (
                     <>
-                        <div 
-                            ref={scrollContainerRef} // <--- Added this ref for Smart Scroll
-                            className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar bg-black/20"
-                        >
-                            {hasMore && !loadingMessages && (
-                                <button onClick={loadMore} className="w-full text-center py-2 text-[9px] text-gray-500 hover:text-blue-400 transition uppercase font-bold tracking-tighter">↑ Load Previous</button>
-                            )}
-                            {loadingMessages ? (<div className="h-full flex items-center justify-center text-gray-500"><Loader2 size={24} className="animate-spin" /></div>) : (
-                                <>
-                                    {messages.length === 0 && <div className="h-full flex items-center justify-center text-gray-600 text-xs italic">Say hello! 👋</div>}
-                                    {messages.map(msg => {
-                                        const isMe = msg.sender_id === currentUserId;
-                                        const isMentioned = msg.mentions && msg.mentions.includes(currentUserId);
-                                        return (
-                                            <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} animate-in slide-in-from-bottom-2 duration-300`}>
-                                                <div className={`max-w-[85%] px-3 py-2 rounded-xl text-xs shadow-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : (isMentioned ? 'bg-yellow-500/20 border border-yellow-500 text-yellow-100' : 'bg-[#1e293b] text-gray-200 border border-white/5')} ${!isMe && !isMentioned ? 'rounded-bl-none' : 'rounded-xl'}`}>
-                                                    {!isMe && <span className="block text-[9px] text-blue-400 font-bold mb-0.5">{msg.sender?.real_name}</span>}
-                                                    {msg.content}
-                                                </div>
-                                                <span className="text-[9px] text-gray-600 mt-1 px-1">{new Date(msg.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
-                                            </div>
-                                        );
-                                    })}
-                                    <div ref={messagesEndRef} />
-                                </>
-                            )}
-                        </div>
+                        {messagesContent}
+                        
                         {showTagList && filteredTags.length > 0 && (
                             <div className="absolute bottom-12 left-2 bg-crm-bg border border-white/20 rounded-xl shadow-2xl w-40 overflow-hidden z-50 animate-in slide-in-from-bottom-2">
                                 {filteredTags.map(u => (

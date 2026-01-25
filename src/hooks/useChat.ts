@@ -1,5 +1,23 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+
+// --- HELPER: SORT & DEDUPE ---
+// Moved OUTSIDE the hook so it is a stable reference (never causes re-renders)
+const mergeAndSortMessages = (currentMessages: any[], newBatch: any[]) => {
+  const combined = [...currentMessages, ...newBatch];
+  const uniqueMap = new Map();
+  combined.forEach(msg => {
+      uniqueMap.set(msg.id, msg);
+  });
+  const uniqueList = Array.from(uniqueMap.values());
+
+  return uniqueList.sort((a, b) => {
+      const timeA = new Date(a.created_at).getTime();
+      const timeB = new Date(b.created_at).getTime();
+      if (timeA !== timeB) return timeA - timeB;
+      return a.id > b.id ? 1 : -1;
+  });
+};
 
 export function useChat(roomId: string, currentUserId: string | null) {
   const [messages, setMessages] = useState<any[]>([]);
@@ -10,41 +28,12 @@ export function useChat(roomId: string, currentUserId: string | null) {
   const isMounted = useRef(false);
   const PAGE_SIZE = 50;
 
-  // --- HELPER: SORT & DEDUPE ---
-  // This function forces the messages to ALWAYS be in the correct order
-  // regardless of how the database sends them.
-  const mergeAndSortMessages = (currentMessages: any[], newBatch: any[]) => {
-      // 1. Combine arrays
-      const combined = [...currentMessages, ...newBatch];
-
-      // 2. Remove Duplicates (by ID)
-      const uniqueMap = new Map();
-      combined.forEach(msg => {
-          uniqueMap.set(msg.id, msg);
-      });
-      const uniqueList = Array.from(uniqueMap.values());
-
-      // 3. Strict Sort: Oldest First
-      return uniqueList.sort((a, b) => {
-          const timeA = new Date(a.created_at).getTime();
-          const timeB = new Date(b.created_at).getTime();
-          
-          // Primary Sort: Time
-          if (timeA !== timeB) return timeA - timeB;
-          
-          // Secondary Sort: ID (Tie-breaker for identical times)
-          // We assume higher ID = newer message (if serial). 
-          // If UUID, this just keeps order stable so they don't jump around.
-          return a.id > b.id ? 1 : -1;
-      });
-  };
-
   // 1. Initial Load & Room Switch
   useEffect(() => {
     if (!roomId || !currentUserId) return;
     isMounted.current = true;
 
-    setMessages([]); // Clear instantly
+    setMessages([]); 
     setHasMore(true);
 
     const fetchInitialMessages = async () => {
@@ -54,15 +43,13 @@ export function useChat(roomId: string, currentUserId: string | null) {
         .from('crm_messages')
         .select('*, sender:crm_users(real_name)')
         .eq('room_id', roomId)
-        .order('created_at', { ascending: false }) // Newest first
-        .order('id', { ascending: false })         // Tie-breaker
+        .order('created_at', { ascending: false }) 
+        .order('id', { ascending: false })
         .range(0, PAGE_SIZE - 1); 
       
       if (!error && data) {
         const safeData = data as any[];
-        // We use our helper to sort them correctly (Oldest -> Newest)
         setMessages(mergeAndSortMessages([], safeData)); 
-        
         if (safeData.length < PAGE_SIZE) setHasMore(false);
       }
       setLoading(false);
@@ -78,6 +65,7 @@ export function useChat(roomId: string, currentUserId: string | null) {
         table: 'crm_messages', 
         filter: `room_id=eq.${roomId}` 
       }, async (payload) => {
+        // Fetch sender name
         const { data: senderData } = await supabase.from('crm_users').select('real_name').eq('id', payload.new.sender_id).single();
         const newMsg: any = { ...payload.new, sender: senderData };
         
@@ -91,13 +79,12 @@ export function useChat(roomId: string, currentUserId: string | null) {
     };
   }, [roomId, currentUserId]);
 
-  // --- 3. LOAD MORE ---
-  const loadMore = async () => {
+  // --- 3. LOAD MORE (OPTIMIZED) ---
+  const loadMore = useCallback(async () => {
     if (loading || !hasMore || messages.length === 0) return;
     
     setLoading(true);
     
-    // Pagination: Skip the number of messages we already have
     const from = messages.length;
     const to = from + PAGE_SIZE - 1;
 
@@ -106,22 +93,21 @@ export function useChat(roomId: string, currentUserId: string | null) {
       .select('*, sender:crm_users(real_name)')
       .eq('room_id', roomId)
       .order('created_at', { ascending: false })
-      .order('id', { ascending: false }) // Important for stability
+      .order('id', { ascending: false }) 
       .range(from, to);
 
     if (!error && data) {
       const safeData = data as any[];
-      
       if (safeData.length > 0) {
           setMessages(prev => mergeAndSortMessages(prev, safeData));
       }
-      
       if (safeData.length < PAGE_SIZE) setHasMore(false);
     }
     setLoading(false);
-  };
+  }, [loading, hasMore, messages, roomId]);
 
-  const sendMessage = async (content: string, mentions: string[] = []) => {
+  // --- 4. SEND MESSAGE (OPTIMIZED) ---
+  const sendMessage = useCallback(async (content: string, mentions: string[] = []) => {
     if (!content.trim() || !currentUserId || !roomId) return;
     setIsSending(true);
     const { error } = await supabase.from('crm_messages').insert({
@@ -133,7 +119,7 @@ export function useChat(roomId: string, currentUserId: string | null) {
     });
     setIsSending(false);
     return error;
-  };
+  }, [currentUserId, roomId]);
 
   return { messages, loading, sendMessage, isSending, loadMore, hasMore };
 }

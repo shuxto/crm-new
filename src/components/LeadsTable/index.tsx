@@ -33,7 +33,7 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
     leads, totalCount, statusOptions, agents, loading, 
     updateLeadStatus, updateLeadAgent, deleteLead,
     bulkUpdateStatus, bulkUpdateAgent, bulkDeleteLeads,
-    updateLocalLead 
+    updateLocalLead, removeLeadFromView // <--- IMPORTED HERE
   } = useLeads(filters, currentUserId);
   
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -87,9 +87,42 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
     setOverlayMode(type); 
 
     if (type === 'transfer') {
-        setTimeout(async () => {
-            await updateLeadStatus(id, 'Transferred');
-        }, 800);
+        // --- NEW: AUTO-UNASSIGN LOGIC FOR CONVERSION ---
+        if (role === 'conversion') {
+            // Wait for overlay to start (UX)
+            setTimeout(async () => {
+                try {
+                    // 1. Get Agent Name
+                    const { data: userData } = await supabase.from('crm_users').select('real_name').eq('id', currentUserId).single();
+                    const agentName = userData?.real_name || 'Agent';
+
+                    // 2. Add System Note with Icons
+                    const noteText = `🔄 **TRANSFERRED**\n\n👤 Handled by: ${agentName}\n📉 Action: Manual Transfer & Unassign`;
+                    
+                    await supabase.from('crm_notes').insert({
+                        lead_id: id,
+                        content: noteText,
+                        author_name: 'System', 
+                    });
+
+                    // 3. Unassign and set Status
+                    await updateLeadAgent(id, null);
+                    await updateLeadStatus(id, 'Transferred');
+                    
+                    // 4. Instantly remove from view (Poof!)
+                    removeLeadFromView(id);
+                    
+                    window.dispatchEvent(new CustomEvent('crm-toast', { detail: { message: 'Transferred & Unassigned', type: 'success' } }));
+                } catch (err) {
+                    console.error("Transfer error:", err);
+                }
+            }, 800);
+        } else {
+            // Normal behavior for Admin/Manager
+            setTimeout(async () => {
+                await updateLeadStatus(id, 'Transferred');
+            }, 800);
+        }
     } else if (type === 'ftd') {
         await updateLeadStatus(id, 'FTD');
     } else if (type === 'upsale') {

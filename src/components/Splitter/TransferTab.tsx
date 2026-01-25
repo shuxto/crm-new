@@ -2,19 +2,30 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { ArrowRightLeft, User, FolderOpen, Loader2, Search, CheckCircle2 } from 'lucide-react';
 
+// IMPORT MODALS
+import ConfirmationModal from '../Team/ConfirmationModal';
+import SuccessModal from '../Team/SuccessModal';
+
 export default function TransferTab() {
   const [agents, setAgents] = useState<any[]>([]);
   const [folders, setFolders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
 
-  // CHANGED: Multi-select for source
+  // Multi-select for source
   const [fromAgents, setFromAgents] = useState<string[]>([]);
   const [targetAgent, setTargetAgent] = useState<string | null>(null);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [limit, setLimit] = useState<number>(0);
-  const [targetStatus, setTargetStatus] = useState<'New' | 'Shuffle'>('New');
+  
+  // Default status
+  const [targetStatus, setTargetStatus] = useState<'New' | 'Shuffled'>('New');
+  
   const [fromSearch, setFromSearch] = useState('');
+
+  // MODAL STATES
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
 
   useEffect(() => {
     const loadAgents = async () => {
@@ -50,27 +61,66 @@ export default function TransferTab() {
       else setFromAgents(prev => [...prev, id]);
   };
 
-  const handleExecute = async () => {
+  // 1. INITIATE: Check and open modal
+  const handleInitiate = () => {
     if (fromAgents.length === 0 || !selectedFolder) return;
+    setShowConfirm(true);
+  };
+
+  // 2. EXECUTE: The actual logic
+  const executeTransfer = async () => {
     setProcessing(true);
+    let totalMoved = 0; 
     
-    for (const agentId of fromAgents) {
-        if(agentId === targetAgent) continue;
+    try {
+        for (const agentId of fromAgents) {
+            if(agentId === targetAgent) continue;
+            
+            const { data, error } = await supabase.rpc('transfer_leads_v2', {
+                from_agent_id: agentId,
+                to_agent_id: targetAgent, 
+                folder_name: selectedFolder,
+                limit_count: limit > 0 ? Math.floor(limit / fromAgents.length) : 1000000,
+                target_status: targetStatus 
+            });
+
+            if (error) throw error;
+            totalMoved += (data as number) || 0; 
+        }
         
-        await supabase.rpc('transfer_leads_v2', {
-            from_agent_id: agentId,
-            to_agent_id: targetAgent,
-            folder_name: selectedFolder,
-            limit_count: limit > 0 ? Math.floor(limit / fromAgents.length) : 1000000,
-            target_status: targetStatus
-        });
+        setShowConfirm(false);
+        
+        if (totalMoved === 0) {
+            alert("Warning: 0 Leads were transferred. Check if the folder is empty or agents have no leads.");
+        } else {
+            setShowSuccess(true);
+        }
+        
+    } catch (err: any) {
+        alert("CRITICAL ERROR: " + err.message);
+    } finally {
+        setProcessing(false);
     }
+  };
+
+  // --- THE FIX IS HERE ---
+  const handleSuccessClose = () => {
+    setShowSuccess(false);
+    // REMOVED: window.location.reload(); 
     
-    window.location.reload();
-    setProcessing(false);
+    // ADDED: Reset the form instead. This keeps you on the same tab!
+    setFromAgents([]);       // Deselect agents
+    setSelectedFolder(null); // Deselect folder
+    setTargetAgent(null);    // Reset target
+    setLimit(0);             // Reset limit
+    // Note: This forces the user to select again, ensuring data counts are refreshed.
   };
 
   const filteredAgents = agents.filter(a => a.real_name.toLowerCase().includes(fromSearch.toLowerCase()));
+  
+  const totalAvailable = folders.find(f => f.name === selectedFolder)?.count || 0;
+  const estimatedMove = limit > 0 && limit < totalAvailable ? limit : totalAvailable;
+
   if (loading) return <Loader2 className="animate-spin mx-auto mt-10" />;
 
   return (
@@ -130,7 +180,9 @@ export default function TransferTab() {
             <div>
                 <label className="text-xs font-bold text-gray-500 uppercase mb-2 block tracking-wider">Target Destination</label>
                 <select className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-white text-sm focus:border-fuchsia-500 outline-none hover:bg-white/10 cursor-pointer appearance-none"
-                    onChange={(e) => setTargetAgent(e.target.value === 'POOL' ? null : e.target.value)}>
+                    onChange={(e) => setTargetAgent(e.target.value === 'POOL' ? null : e.target.value)}
+                    value={targetAgent || 'POOL'}
+                >
                     <option className="text-black" value="POOL">📥 Return to Pool (Unassign)</option>
                     {agents.map(a => (<option className="text-black" key={a.id} value={a.id} disabled={fromAgents.includes(a.id)}>👤 {a.real_name}</option>))}
                 </select>
@@ -140,7 +192,7 @@ export default function TransferTab() {
                 <label className="text-xs font-bold text-gray-500 uppercase mb-3 block tracking-wider">Status Protocol</label>
                 <div className="flex bg-black/50 p-1 rounded-lg">
                     <button onClick={() => setTargetStatus('New')} className={`flex-1 py-3 rounded-lg text-xs font-bold uppercase transition-all ${targetStatus === 'New' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}>New</button>
-                    <button onClick={() => setTargetStatus('Shuffle')} className={`flex-1 py-3 rounded-lg text-xs font-bold uppercase transition-all ${targetStatus === 'Shuffle' ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}>Shuffle</button>
+                    <button onClick={() => setTargetStatus('Shuffled')} className={`flex-1 py-3 rounded-lg text-xs font-bold uppercase transition-all ${targetStatus === 'Shuffled' ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}>Shuffle</button>
                 </div>
             </div>
 
@@ -151,11 +203,30 @@ export default function TransferTab() {
             </div>
          </div>
 
-         <button onClick={handleExecute} disabled={fromAgents.length === 0 || !selectedFolder || processing}
+         <button onClick={handleInitiate} disabled={fromAgents.length === 0 || !selectedFolder || processing}
             className="w-full py-5 mt-4 bg-linear-to-r from-fuchsia-600 to-purple-600 hover:from-fuchsia-500 hover:to-purple-500 text-white font-bold uppercase tracking-[0.2em] rounded-xl shadow-[0_0_25px_rgba(192,38,211,0.4)] disabled:opacity-50 transition flex items-center justify-center gap-3 relative z-10 hover:scale-[1.02]">
             {processing ? <Loader2 className="animate-spin" /> : <ArrowRightLeft />} TRANSFER ASSETS
          </button>
       </div>
+
+      {/* --- MODALS --- */}
+      <ConfirmationModal 
+          isOpen={showConfirm}
+          title="CONFIRM ASSET TRANSFER"
+          message={`You are about to transfer up to ${estimatedMove} leads from ${fromAgents.length} agents.\n\nTarget: ${targetAgent ? 'Selected Agent' : 'The Pool'}\nStatus: ${targetStatus}`}
+          type="info"
+          onClose={() => setShowConfirm(false)}
+          onConfirm={executeTransfer}
+          loading={processing}
+      />
+
+      <SuccessModal 
+          isOpen={showSuccess}
+          title="TRANSFER COMPLETE"
+          message="Leads have been successfully re-assigned."
+          type="success"
+          onClose={handleSuccessClose}
+      />
     </div>
   );
 }

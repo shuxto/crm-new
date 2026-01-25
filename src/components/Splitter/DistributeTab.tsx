@@ -2,6 +2,10 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Users, FolderOpen, Zap, Loader2, Search, CheckCircle2, Database } from 'lucide-react';
 
+// IMPORT YOUR MODALS
+import ConfirmationModal from '../Team/ConfirmationModal';
+import SuccessModal from '../Team/SuccessModal';
+
 function NumberTicker({ value }: { value: number }) {
     const [displayValue, setDisplayValue] = useState(0);
     useEffect(() => {
@@ -27,9 +31,14 @@ export default function DistributeTab() {
   const [folders, setFolders] = useState<any[]>([]);
   const [selectedAgents, setSelectedAgents] = useState<string[]>([]);
   const [selectedFolders, setSelectedFolders] = useState<string[]>([]);
+  
   const [processing, setProcessing] = useState(false);
   const [folderSearch, setFolderSearch] = useState('');
   const [agentSearch, setAgentSearch] = useState('');
+
+  // --- NEW MODAL STATES ---
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
@@ -62,26 +71,47 @@ export default function DistributeTab() {
       else setSelectedFolders(prev => [...prev, name]);
   };
 
-  const handleExecute = async () => {
+  // 1. BUTTON CLICK: Just opens the modal
+  const handleInitiate = () => {
       if (totalLeads === 0 || selectedAgents.length === 0) return;
+      setShowConfirm(true);
+  };
+
+  // 2. CONFIRM CLICK: Runs the actual logic
+  const executeDistribution = async () => {
       setProcessing(true);
       try {
         for (const folderName of selectedFolders) {
             const f = folders.find(fo => fo.name === folderName);
             if (!f) continue;
+            
             const count = f.count;
             const perAgentThisFolder = Math.floor(count / selectedAgents.length);
             let rem = count % selectedAgents.length;
+            
             const folderPayload = selectedAgents.map(agentId => {
                 const amount = perAgentThisFolder + (rem > 0 ? 1 : 0);
                 if (rem > 0) rem--;
                 return { agent_id: agentId, count: amount, folder: folderName };
             });
+            
             await supabase.rpc('distribute_leads_bulk', { payload: folderPayload });
         }
-        window.location.reload();
-      } catch (err: any) { alert("Error: " + err.message); }
+        
+        // SUCCESS: Close confirm, open success
+        setShowConfirm(false);
+        setShowSuccess(true);
+        
+      } catch (err: any) { 
+          alert("Error: " + err.message); 
+      }
       setProcessing(false);
+  };
+
+  // 3. SUCCESS CLOSE: Reloads page
+  const handleSuccessClose = () => {
+      setShowSuccess(false);
+      window.location.reload();
   };
 
   return (
@@ -116,11 +146,10 @@ export default function DistributeTab() {
              </div>
         </div>
 
-        {/* 2. ENGINE (FIXED LAYOUT) */}
+        {/* 2. ENGINE */}
         <div className="lg:col-span-6 flex flex-col bg-black/40 backdrop-blur-xl border border-white/10 rounded-3xl p-8 relative overflow-hidden h-150 shadow-2xl">
             <div className="absolute inset-0 bg-linear-to-b from-blue-500/5 to-transparent pointer-events-none"></div>
             
-            {/* Top Section */}
             <div className="flex-1 flex flex-col justify-center items-center text-center w-full max-w-md mx-auto space-y-12 relative z-10">
                 <div>
                     <p className="text-blue-400 text-xs font-bold uppercase tracking-[0.3em] mb-4">Total Input Volume</p>
@@ -147,9 +176,8 @@ export default function DistributeTab() {
                 </div>
             </div>
 
-            {/* Bottom Button (Relative now to avoid overlap) */}
             <div className="mt-6 relative z-10">
-                <button onClick={handleExecute} disabled={totalLeads === 0 || selectedAgents.length === 0 || processing}
+                <button onClick={handleInitiate} disabled={totalLeads === 0 || selectedAgents.length === 0 || processing}
                     className="w-full py-5 bg-linear-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-black uppercase tracking-[0.2em] rounded-xl shadow-[0_0_30px_rgba(6,182,212,0.4)] transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed hover:scale-[1.02] active:scale-[0.98]">
                     {processing ? <Loader2 className="animate-spin" /> : <Zap size={20} fill="currentColor" />} INITIATE DISTRIBUTION
                 </button>
@@ -188,6 +216,25 @@ export default function DistributeTab() {
                 })}
              </div>
         </div>
+
+        {/* --- MODALS --- */}
+        <ConfirmationModal 
+            isOpen={showConfirm}
+            title="CONFIRM DISTRIBUTION"
+            message={`You are about to distribute ${totalLeads} leads among ${selectedAgents.length} agents.\n\nEstimated: ~${perAgent} leads per agent.`}
+            type="info" // Use 'info' or 'danger' depending on preference
+            onClose={() => setShowConfirm(false)}
+            onConfirm={executeDistribution}
+            loading={processing}
+        />
+
+        <SuccessModal 
+            isOpen={showSuccess}
+            title="DISTRIBUTION COMPLETE"
+            message={`Successfully distributed ${totalLeads} leads.`}
+            type="success"
+            onClose={handleSuccessClose}
+        />
     </div>
   );
 }

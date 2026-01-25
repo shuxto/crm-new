@@ -122,6 +122,12 @@ export function useLeads(filters: any, currentUserId?: string) {
     setLeads(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l));
   };
 
+  // NEW: Instantly hide a lead (Used for Transfer logic)
+  const removeLeadFromView = (id: string) => {
+      setLeads(prev => prev.filter(l => l.id !== id));
+      setTotalCount(prev => prev - 1);
+  };
+
   const updateLeadStatus = async (leadId: string, newStatus: string) => {
     const lead = leads.find(l => l.id === leadId);
     const oldStatus = lead ? lead.status : null;
@@ -169,6 +175,6 @@ export function useLeads(filters: any, currentUserId?: string) {
     leads, totalCount, statusOptions, agents, loading, 
     updateLeadStatus, updateLeadAgent, deleteLead,
     bulkUpdateStatus, bulkUpdateAgent, bulkDeleteLeads,
-    updateLocalLead 
+    updateLocalLead, removeLeadFromView // <--- EXPORTED HERE
   };
 }

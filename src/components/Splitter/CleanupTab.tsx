@@ -1,20 +1,22 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Trash2, FolderMinus, UserX, Loader2, AlertTriangle, Search, CheckSquare } from 'lucide-react';
-import ConfirmationModal from '../Team/ConfirmationModal'; // Reusing existing modals
-import SuccessModal from '../Team/SuccessModal'; // Reusing existing modals
+import ConfirmationModal from '../Team/ConfirmationModal'; 
+import SuccessModal from '../Team/SuccessModal'; 
 
 export default function CleanupTab() {
   const [folders, setFolders] = useState<any[]>([]);
   const [agents, setAgents] = useState<any[]>([]);
   const [selectedFolders, setSelectedFolders] = useState<string[]>([]);
   const [selectedAgents, setSelectedAgents] = useState<string[]>([]);
-  const [targetStatus, setTargetStatus] = useState<'New' | 'Shuffle'>('Shuffle');
+  
+  // FIX 1: Changed default state to 'Shuffled'
+  const [targetStatus, setTargetStatus] = useState<'New' | 'Shuffled'>('Shuffled');
+  
   const [processing, setProcessing] = useState(false);
   const [folderSearch, setFolderSearch] = useState('');
   const [agentSearch, setAgentSearch] = useState('');
 
-  // MODAL STATES
   const [showConfirm, setShowConfirm] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
 
@@ -61,13 +63,11 @@ export default function CleanupTab() {
       else setSelectedAgents(agents.map(a => a.agent_id)); 
   };
 
-  // TRIGGER CONFIRMATION MODAL
   const handlePurgeClick = () => {
     if (selectedFolders.length === 0 || selectedAgents.length === 0) return;
     setShowConfirm(true);
   };
 
-  // EXECUTE ACTUAL PURGE
   const executePurge = async () => {
     setProcessing(true);
     const { error } = await supabase.rpc('cleanup_leads_v2', {
@@ -82,12 +82,11 @@ export default function CleanupTab() {
     if (error) {
         alert("Error: " + error.message);
     } else {
-        // SUCCESS: Show Success Modal & Refresh Data
         setShowSuccess(true);
-        loadFolders(); // Refresh folders
-        setAgents([]); // Clear old agent list
-        setSelectedAgents([]); // Reset selection
-        setSelectedFolders([]); // Reset selection
+        loadFolders(); 
+        setAgents([]); 
+        setSelectedAgents([]); 
+        setSelectedFolders([]); 
     }
   };
 
@@ -190,7 +189,8 @@ export default function CleanupTab() {
                 <label className="text-xs font-bold text-gray-500 uppercase mb-3 block tracking-wider">Return Status</label>
                 <div className="flex bg-black/50 p-1 rounded-lg">
                     <button onClick={() => setTargetStatus('New')} className={`flex-1 py-3 rounded-lg text-xs font-bold uppercase transition-all ${targetStatus === 'New' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-white'}`}>New</button>
-                    <button onClick={() => setTargetStatus('Shuffle')} className={`flex-1 py-3 rounded-lg text-xs font-bold uppercase transition-all ${targetStatus === 'Shuffle' ? 'bg-purple-600 text-white' : 'text-gray-500 hover:text-white'}`}>Shuffle</button>
+                    {/* FIX 2 & 3: Value and Check Updated */}
+                    <button onClick={() => setTargetStatus('Shuffled')} className={`flex-1 py-3 rounded-lg text-xs font-bold uppercase transition-all ${targetStatus === 'Shuffled' ? 'bg-purple-600 text-white' : 'text-gray-500 hover:text-white'}`}>Shuffle</button>
                 </div>
             </div>
 
@@ -216,7 +216,7 @@ export default function CleanupTab() {
             isOpen={showSuccess} 
             title="PURGE COMPLETE" 
             message="Leads have been successfully returned to the pool." 
-            type="success" // <--- ADD THIS LINE
+            type="success" 
             onClose={() => setShowSuccess(false)} 
         />
     </div>

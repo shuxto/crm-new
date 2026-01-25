@@ -13,6 +13,7 @@
     "@supabase/supabase-js": "^2.90.1",
     "@tailwindcss/vite": "^4.1.18",
     "@types/papaparse": "^5.5.2",
+    "emoji-picker-react": "^4.17.1",
     "lucide-react": "^0.562.0",
     "papaparse": "^5.5.3",
     "react": "^19.2.0",

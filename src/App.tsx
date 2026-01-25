@@ -10,6 +10,7 @@ import LoginPage from './components/LoginPage';
 import Sidebar from './components/Sidebar';
 import NotificationSystem from './components/NotificationSystem';
 import LeadProfilePage from './components/LeadProfile';
+import ChatBubble from './components/Chat/ChatBubble';
 
 // PAGES
 import Dashboard from './pages/Dashboard';
@@ -18,13 +19,19 @@ import TeamManagement from './components/Team';
 import ShufflePage from './components/Shuffle'; 
 import CallsPage from './components/Calls';
 import SplitterPage from './components/Splitter';
+import ChatPage from './pages/ChatPage';
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false); // <--- NEW STATE
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  
+  const [showBubble, setShowBubble] = useState(false);
+  // --- NEW: This fixes the Red Dot issue ---
+  // It tracks which room you are currently looking at.
+  const [activeBubbleRoom, setActiveBubbleRoom] = useState<string | null>(null); 
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -41,7 +48,6 @@ export default function App() {
       });
     });
 
-    // Handle Custom Event for Opening Leads
     const handleOpenLead = async (event: Event) => {
         const e = event as CustomEvent; 
         const leadId = e.detail;
@@ -63,7 +69,6 @@ export default function App() {
 
   const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode, allowedRoles: string[] }) => {
     const role = session?.user?.user_metadata?.role || 'conversion';
-    
     if (!allowedRoles.includes(role)) {
       return (
         <div className="h-full flex flex-col items-center justify-center p-10 text-center animate-in zoom-in-95">
@@ -98,50 +103,35 @@ export default function App() {
       <div className="flex min-h-screen font-sans text-[#e2e8f0]">
         <NotificationSystem />
 
+        {/* --- CHAT BUBBLE WIDGET --- */}
+        {session?.user?.id && showBubble && (
+            <ChatBubble 
+                currentUserId={session.user.id} 
+                onClose={() => { setShowBubble(false); setActiveBubbleRoom(null); }} 
+                onRoomChange={setActiveBubbleRoom} // <--- Important: This tells App where you are
+            />
+        )}
+
         <Sidebar 
             role={currentRole} 
             username={session.user.email || 'User'} 
             isCollapsed={isSidebarCollapsed}
             onToggle={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+            onOpenBubble={() => setShowBubble(true)}
+            activeBubbleRoom={activeBubbleRoom} // <--- Important: This tells Sidebar to hide the red dot
         />
         
-        {/* --- FIXED MARGIN LOGIC HERE --- */}
-        <main 
-            className={`
-                flex-1 p-6 relative z-10 overflow-y-auto h-screen transition-all duration-300
-                ${isSidebarCollapsed ? 'md:ml-20' : 'md:ml-64'} 
-            `}
-        >
+        <main className={`flex-1 p-6 relative z-10 overflow-y-auto h-screen transition-all duration-300 ${isSidebarCollapsed ? 'md:ml-20' : 'md:ml-64'}`}>
           <Routes>
-            <Route path="/" element={
-              <Dashboard session={session} onLeadClick={setSelectedLead} />
-            } />
-
-            <Route path="/team" element={
-              <ProtectedRoute allowedRoles={['admin', 'manager']}>
-                <TeamManagement />
-              </ProtectedRoute>
-            } />
-
-            <Route path="/files" element={
-              <ProtectedRoute allowedRoles={['admin', 'manager']}>
-                <FileManager />
-              </ProtectedRoute>
-            } />
-
-            <Route path="/shuffle" element={
-              <ProtectedRoute allowedRoles={['admin', 'manager', 'team_leader']}>
-                <ShufflePage />
-              </ProtectedRoute>
-            } />
-
-            <Route path="/splitter" element={
-              <ProtectedRoute allowedRoles={['admin', 'manager']}>
-                <SplitterPage />
-              </ProtectedRoute>
-            } />
-
+            <Route path="/" element={<Dashboard session={session} onLeadClick={setSelectedLead} />} />
+            <Route path="/team" element={<ProtectedRoute allowedRoles={['admin', 'manager']}><TeamManagement /></ProtectedRoute>} />
+            <Route path="/files" element={<ProtectedRoute allowedRoles={['admin', 'manager']}><FileManager /></ProtectedRoute>} />
+            <Route path="/shuffle" element={<ProtectedRoute allowedRoles={['admin', 'manager', 'team_leader']}><ShufflePage /></ProtectedRoute>} />
+            <Route path="/splitter" element={<ProtectedRoute allowedRoles={['admin', 'manager']}><SplitterPage /></ProtectedRoute>} />
             <Route path="/calls" element={<CallsPage />} />
+            
+            {/* --- NEW CHAT PAGE --- */}
+            <Route path="/chat" element={<ChatPage />} />
 
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

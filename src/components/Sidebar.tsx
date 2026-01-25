@@ -3,7 +3,8 @@ import {
   LayoutDashboard, Users, Phone, 
   LogOut, Shield, Briefcase, 
   Shuffle, Split, FolderOpen,
-  Menu, ChevronLeft, ChevronRight
+  Menu, ChevronLeft, ChevronRight,
+  MessageCircle 
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { NavLink } from 'react-router-dom';
@@ -12,26 +13,81 @@ import NotificationBell from './NotificationBell';
 interface SidebarProps {
   role: string;
   username: string;
-  isCollapsed: boolean;      // <--- NEW PROP
-  onToggle: () => void;      // <--- NEW PROP
+  isCollapsed: boolean; 
+  onToggle: () => void; 
+  onOpenBubble: () => void; 
+  activeBubbleRoom: string | null; // <--- NEW PROP
 }
 
-export default function Sidebar({ role, username, isCollapsed, onToggle }: SidebarProps) {
+export default function Sidebar({ role, username, isCollapsed, onToggle, onOpenBubble, activeBubbleRoom }: SidebarProps) {
   const [userId, setUserId] = useState<string | null>(null);
-  const [isMobileOpen, setIsMobileOpen] = useState(false); // Mobile state stays internal
+  const [isMobileOpen, setIsMobileOpen] = useState(false); 
+  
+  const [unreadGlobal, setUnreadGlobal] = useState(0);
+  const [unreadDM, setUnreadDM] = useState(0);
+  const [myRooms, setMyRooms] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user?.id) setUserId(data.user.id);
-    });
+    const init = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+            setUserId(user.id);
+            fetchMyRooms(user.id);
+        }
+    };
+    init();
   }, []);
+
+  const fetchMyRooms = async (uid: string) => {
+      const { data } = await supabase.from('crm_chat_participants').select('room_id').eq('user_id', uid);
+      if (data) {
+          const roomIds = new Set(data.map(r => r.room_id));
+          setMyRooms(roomIds);
+      }
+  };
+
+  useEffect(() => {
+      if (!userId) return;
+
+      const sub = supabase.channel('sidebar-notifications')
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'crm_messages' }, (payload) => {
+              const newMsg = payload.new;
+              if (newMsg.sender_id === userId) return;
+
+              // --- FIXED NOTIFICATION LOGIC ---
+              // If we are currently looking at this room in the bubble, DON'T ALERT
+              if (newMsg.room_id === activeBubbleRoom) return;
+
+              if (newMsg.room_id === '00000000-0000-0000-0000-000000000000') {
+                  setUnreadGlobal(prev => prev + 1);
+              } else if (myRooms.has(newMsg.room_id)) {
+                  setUnreadDM(prev => prev + 1);
+              }
+          })
+          .subscribe();
+
+      return () => { supabase.removeChannel(sub); };
+  }, [userId, myRooms, activeBubbleRoom]); // <--- Added activeBubbleRoom as dependency
   
   const handleLogout = async () => {
     await supabase.auth.signOut();
   };
 
+  const clearGlobal = () => setUnreadGlobal(0);
+  const clearDM = () => {
+      setUnreadDM(0);
+      onOpenBubble();
+  };
+
   const menuItems = [
     { path: '/', label: 'Leads', icon: LayoutDashboard, roles: ['admin', 'manager', 'retention', 'conversion', 'team_leader'] },
+    { 
+        path: '/chat', 
+        label: 'Messenger', 
+        icon: MessageCircle, 
+        roles: ['admin', 'manager', 'retention', 'conversion'],
+        hasBadge: unreadGlobal > 0
+    },
     { path: '/team', label: 'Team', icon: Users, roles: ['admin', 'manager'] },
     { path: '/shuffle', label: 'Shuffle', icon: Shuffle, roles: ['admin', 'manager', 'team_leader'] },
     { path: '/splitter', label: 'Splitter', icon: Split, roles: ['admin', 'manager'] },
@@ -43,7 +99,6 @@ export default function Sidebar({ role, username, isCollapsed, onToggle }: Sideb
 
   return (
     <>
-      {/* --- MOBILE: OVERLAY --- */}
       {isMobileOpen && (
         <div 
           className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden animate-in fade-in"
@@ -51,7 +106,6 @@ export default function Sidebar({ role, username, isCollapsed, onToggle }: Sideb
         />
       )}
 
-      {/* --- MOBILE: HAMBURGER BUTTON --- */}
       <button 
         onClick={() => setIsMobileOpen(true)}
         className="md:hidden fixed top-4 left-4 z-50 p-2 bg-crm-bg border border-white/10 rounded-lg text-white shadow-lg active:scale-95 transition"
@@ -59,7 +113,6 @@ export default function Sidebar({ role, username, isCollapsed, onToggle }: Sideb
         <Menu size={24} />
       </button>
 
-      {/* --- SIDEBAR CONTAINER --- */}
       <aside 
         className={`
           fixed inset-y-0 left-0 z-50 h-screen bg-crm-bg border-r border-white/5 flex flex-col transition-all duration-300
@@ -69,7 +122,6 @@ export default function Sidebar({ role, username, isCollapsed, onToggle }: Sideb
           w-64
         `}
       >
-        {/* DESKTOP TOGGLE BUTTON */}
         <button
             onClick={onToggle}
             className="hidden md:flex absolute -right-3 top-9 w-6 h-6 bg-blue-600 rounded-full items-center justify-center text-white shadow-lg cursor-pointer hover:bg-blue-500 hover:scale-110 transition z-50 border border-crm-bg"
@@ -79,7 +131,6 @@ export default function Sidebar({ role, username, isCollapsed, onToggle }: Sideb
 
         <div className="p-6 flex flex-col h-full">
           
-          {/* HEADER */}
           <div className={`flex items-center mb-8 transition-all ${isCollapsed ? 'justify-center flex-col gap-4' : 'justify-between'}`}>
               <div className="flex items-center gap-3">
                   <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/20 shrink-0">
@@ -92,7 +143,6 @@ export default function Sidebar({ role, username, isCollapsed, onToggle }: Sideb
                   )}
               </div>
               
-              {/* BELL */}
               {userId && (
                 <div className={isCollapsed ? "" : ""}>
                    <NotificationBell userId={userId} />
@@ -100,15 +150,17 @@ export default function Sidebar({ role, username, isCollapsed, onToggle }: Sideb
               )}
           </div>
 
-          {/* MENU */}
           <nav className="space-y-1 flex-1">
             {filteredMenu.map((item) => (
               <NavLink
                 key={item.path}
                 to={item.path}
-                onClick={() => setIsMobileOpen(false)}
+                onClick={() => {
+                    setIsMobileOpen(false);
+                    if (item.path === '/chat') clearGlobal();
+                }}
                 className={({ isActive }) => `
-                  w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 group cursor-pointer
+                  w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 group cursor-pointer relative
                   ${isCollapsed ? 'justify-center' : ''}
                   ${isActive 
                     ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20 translate-x-1' 
@@ -117,7 +169,14 @@ export default function Sidebar({ role, username, isCollapsed, onToggle }: Sideb
                 `}
                 title={isCollapsed ? item.label : undefined}
               >
-                <item.icon size={20} className="shrink-0" />
+                <div className="relative">
+                    <item.icon size={20} className="shrink-0" />
+                    {/* @ts-ignore */}
+                    {item.hasBadge && (
+                        <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-crm-bg"></span>
+                    )}
+                </div>
+                
                 {!isCollapsed && (
                    <span className="font-medium text-sm whitespace-nowrap animate-in fade-in slide-in-from-left-2 duration-300">
                      {item.label}
@@ -127,8 +186,24 @@ export default function Sidebar({ role, username, isCollapsed, onToggle }: Sideb
             ))}
           </nav>
 
-          {/* FOOTER */}
           <div className={`mt-auto pt-6 border-t border-white/5 ${isCollapsed ? 'flex flex-col items-center' : ''}`}>
+             
+             <button 
+                onClick={clearDM} 
+                className={`mb-3 w-full bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition flex items-center justify-center relative ${isCollapsed ? 'p-2' : 'py-2 gap-2'}`}
+                title="Open Quick Chat"
+             >
+                <div className="relative">
+                    <MessageCircle size={18} />
+                    {unreadDM > 0 && (
+                        <span className="absolute -top-2 -right-2 w-3.5 h-3.5 bg-red-500 border-2 border-blue-600 rounded-full flex items-center justify-center text-[8px] font-bold">
+                            {unreadDM > 9 ? '!' : unreadDM}
+                        </span>
+                    )}
+                </div>
+                {!isCollapsed && <span className="text-sm font-bold">Quick Chat</span>}
+             </button>
+
              {!isCollapsed ? (
                 <div className="bg-black/20 p-4 rounded-xl animate-in fade-in duration-300">
                   <div className="flex items-center gap-3 mb-4">

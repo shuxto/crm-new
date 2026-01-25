@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Bell, Check, Trash2, ExternalLink } from 'lucide-react';
+import { Bell, Check, Trash2, ExternalLink, MessageCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useNavigate } from 'react-router-dom'; // <--- REQUIRED FOR CHAT NAVIGATION
 
 interface Notification {
   id: string;
@@ -9,7 +10,7 @@ interface Notification {
   message: string;
   is_read: boolean;
   created_at: string;
-  related_lead_id?: string; // <--- ADDED THIS FIELD
+  related_lead_id?: string; 
 }
 
 export default function NotificationBell({ userId }: { userId: string }) {
@@ -17,11 +18,12 @@ export default function NotificationBell({ userId }: { userId: string }) {
   const [isOpen, setIsOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   
-  // We need coordinates to position the floating menu
   const [coords, setCoords] = useState({ top: 0, left: 0 });
   
   const buttonRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  
+  const navigate = useNavigate(); // <--- Hook to change pages
 
   // 1. Fetch & Subscribe
   useEffect(() => {
@@ -60,19 +62,19 @@ export default function NotificationBell({ userId }: { userId: string }) {
     return () => { supabase.removeChannel(sub); };
   }, [userId]);
 
-  // 2. Smart Toggle (Calculates Position)
+  // 2. Smart Toggle
   const toggleOpen = () => {
     if (!isOpen && buttonRef.current) {
         const rect = buttonRef.current.getBoundingClientRect();
         setCoords({
-            top: rect.bottom + 10, // 10px below the bell
-            left: rect.left        // Aligned with left edge of bell
+            top: rect.bottom + 10, 
+            left: rect.left        
         });
     }
     setIsOpen(!isOpen);
   };
 
-  // 3. Click Outside Handler
+  // 3. Click Outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
@@ -115,10 +117,18 @@ export default function NotificationBell({ userId }: { userId: string }) {
     await supabase.from('crm_notifications').delete().eq('id', id);
   };
 
-  // --- NEW: HANDLE NOTIFICATION CLICK ---
+  // --- FIXED: HANDLE NOTIFICATION CLICK (Chat vs Lead) ---
   const handleNotifClick = (n: Notification) => {
       if (n.related_lead_id) {
-          window.dispatchEvent(new CustomEvent('crm-open-lead-id', { detail: n.related_lead_id }));
+          // CHECK: Is this a Chat Notification? (Based on title from SQL Trigger)
+          if (n.title.toLowerCase().includes('tagged') || n.title.toLowerCase().includes('mentioned')) {
+              // Navigate to Chat Page with Room ID
+              navigate(`/chat?room_id=${n.related_lead_id}`);
+          } else {
+              // It is a CRM Lead -> Open Lead Modal
+              window.dispatchEvent(new CustomEvent('crm-open-lead-id', { detail: n.related_lead_id }));
+          }
+          
           setIsOpen(false);
           markAsRead(n.id);
       }
@@ -126,7 +136,7 @@ export default function NotificationBell({ userId }: { userId: string }) {
 
   return (
     <>
-      {/* BELL BUTTON (Stays in Sidebar) */}
+      {/* BELL BUTTON */}
       <button 
         ref={buttonRef}
         onClick={toggleOpen}
@@ -134,19 +144,16 @@ export default function NotificationBell({ userId }: { userId: string }) {
       >
         <Bell size={18} className={unreadCount > 0 ? "animate-[swing_1s_ease-in-out_infinite]" : ""} />
         {unreadCount > 0 && (
-          // FIXED: Replaced border-[#0f172a] with border-crm-bg
           <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full shadow-lg border-2 border-crm-bg flex items-center justify-center text-[8px] font-bold text-white">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
       </button>
 
-      {/* DROPDOWN MENU (Teleported to Body) */}
+      {/* DROPDOWN MENU */}
       {isOpen && createPortal(
         <div 
             ref={dropdownRef}
-            // FIXED: Replaced z-[9999] with z-50
-            // FIXED: Replaced bg-[#0f172a] with bg-crm-bg
             className="fixed z-50 w-80 sm:w-96 bg-crm-bg/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.5)] overflow-hidden animate-in fade-in zoom-in-95 duration-200"
             style={{ 
                 top: coords.top, 
@@ -194,7 +201,12 @@ export default function NotificationBell({ userId }: { userId: string }) {
                   <div className="flex-1 min-w-0 pr-6">
                     <h4 className={`text-xs font-bold mb-1 truncate ${n.is_read ? 'text-gray-400' : 'text-white'}`}>
                         {n.title}
-                        {n.related_lead_id && <ExternalLink size={10} className="inline ml-1.5 opacity-50" />}
+                        {/* Show Chat Icon if it's a mention, otherwise External Link */}
+                        {n.related_lead_id && (
+                            n.title.toLowerCase().includes('tagged') 
+                            ? <MessageCircle size={10} className="inline ml-1.5 opacity-50" />
+                            : <ExternalLink size={10} className="inline ml-1.5 opacity-50" />
+                        )}
                     </h4>
                     
                     <p className="text-[11px] text-gray-400 leading-relaxed mb-2 wrap-break-word">{n.message}</p>

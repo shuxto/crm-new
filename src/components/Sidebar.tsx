@@ -73,31 +73,33 @@ export default function Sidebar({ role, username, isCollapsed, onToggle, onOpenB
           // A. LISTEN FOR NEW MESSAGES (INCREMENT COUNT)
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'crm_messages' }, (payload) => {
               const newMsg = payload.new;
-              if (newMsg.sender_id === userId) return;
+              if (newMsg.sender_id === userId) return; // Ignore my own messages
 
-              // If I am currently looking at this room (Bubble or Page), ignore
-              if (newMsg.room_id === activeBubbleRoom) return;
-              
-              const currentPath = locationRef.current.pathname;
-              const currentParams = new URLSearchParams(locationRef.current.search);
-              const currentChatRoom = currentParams.get('room_id');
-
-              // Page Logic
-              if (currentPath === '/chat') {
-                  if (newMsg.room_id === GLOBAL_CHAT_ID) {
-                      if (!currentChatRoom || currentChatRoom === GLOBAL_CHAT_ID) return; 
-                      setUnreadGlobal(prev => prev + 1);
-                      return;
-                  }
-                  if (currentChatRoom === newMsg.room_id) return; 
-              } else {
-                  if (newMsg.room_id === GLOBAL_CHAT_ID) {
-                      setUnreadGlobal(prev => prev + 1);
-                      return;
-                  }
+              // CHECK 1: Am I looking at this room in the BUBBLE?
+              if (activeBubbleRoom === newMsg.room_id) {
+                  return;
               }
 
-              // --- CRITICAL FIX: Handle New Conversations ---
+              // CHECK 2: Am I looking at this room in the FULL PAGE?
+              const currentPath = window.location.pathname; 
+              const currentParams = new URLSearchParams(window.location.search);
+              const currentPageRoom = currentParams.get('room_id');
+
+              if (currentPath === '/chat') {
+                  // If I'm on the chat page and looking at this specific room, ignore badge
+                  if (currentPageRoom === newMsg.room_id) return;
+                  
+                  // If I'm on chat page looking at Global, and msg is Global, ignore badge
+                  if ((!currentPageRoom || currentPageRoom === GLOBAL_CHAT_ID) && newMsg.room_id === GLOBAL_CHAT_ID) return;
+              }
+
+              // Handle Global Chat Badge
+              if (newMsg.room_id === GLOBAL_CHAT_ID) {
+                  setUnreadGlobal(prev => prev + 1);
+                  return;
+              }
+
+              // Handle DM Badge
               if (myRooms.has(newMsg.room_id)) {
                   setUnreadDM(prev => prev + 1);
               } else if (newMsg.room_id !== GLOBAL_CHAT_ID) {
@@ -122,7 +124,7 @@ export default function Sidebar({ role, username, isCollapsed, onToggle, onOpenB
           .subscribe();
 
       return () => { supabase.removeChannel(sub); };
-  }, [userId, myRooms, activeBubbleRoom]); // Removed unreadDM dependency to avoid stale closures
+  }, [userId, myRooms, activeBubbleRoom]); 
   
   const handleLogout = async () => {
     await supabase.auth.signOut();

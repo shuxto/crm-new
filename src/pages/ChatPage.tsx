@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { Send, Users, Hash, Smile, Search, Loader2 } from 'lucide-react';
 import EmojiPicker, { Theme } from 'emoji-picker-react'; 
@@ -21,10 +21,68 @@ export default function ChatPage() {
   const [mentionIds, setMentionIds] = useState<string[]>([]);
   const [cursorPosition, setCursorPosition] = useState(0); 
 
+  // --- SCROLL REFS ---
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null); // <--- NEW: To control the container
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [userSearch, setUserSearch] = useState('');
 
+  // Track previous message count to decide scroll behavior
+  const prevMessagesLength = useRef(0);
+
+  // --- 1. SMART SCROLL LOGIC ---
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const currentLen = messages.length;
+    const prevLen = prevMessagesLength.current;
+
+    // Case A: Initial Load (0 -> N)
+    if (prevLen === 0 && currentLen > 0) {
+        // Scroll to bottom
+        messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    }
+    // Case B: New Message Arrived (N -> N+1) 
+    // (We assume if length grew by 1, it's a new chat. If it grew by 50, it's history load)
+    else if (currentLen > prevLen && (currentLen - prevLen) < 5) {
+        // Only auto-scroll if user is already near bottom OR if it's my own message
+        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 200;
+        const lastMsg = messages[messages.length - 1];
+        const isMe = lastMsg?.sender_id === currentUser?.id;
+
+        if (isNearBottom || isMe) {
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }
+    }
+    // Case C: History Loaded (N -> N+50)
+    else if (currentLen > prevLen) {
+        // DO NOT JUMP.
+        // The browser actually handles prepending content pretty well automatically,
+        // but if we wanted to be strict, we'd adjust scrollTop here.
+        // For now, doing *nothing* effectively keeps the scroll relative to the bottom content,
+        // preventing the "Jump to Bottom" glitch.
+    }
+
+    prevMessagesLength.current = currentLen;
+  }, [messages, currentUser]);
+
+  // --- MARK READ LOGIC ---
+  const markAsRead = async (roomId: string) => {
+    if (!currentUser) return;
+    await supabase
+      .from('crm_messages')
+      .update({ read: true })
+      .eq('room_id', roomId)
+      .neq('sender_id', currentUser.id)
+      .eq('read', false);
+  };
+
+  useEffect(() => {
+    if (activeRoom && currentUser) markAsRead(activeRoom);
+  }, [activeRoom, messages.length, currentUser]);
+
+  // --- INIT ---
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setCurrentUser(data.user));
     supabase.from('crm_users').select('id, real_name, role').order('real_name')
@@ -44,10 +102,6 @@ export default function ChatPage() {
       }
       window.history.replaceState({}, '', url);
   }, [activeRoom]);
-
-  useEffect(() => {
-    if (!loading) messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length, loading]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const val = e.target.value;
@@ -183,7 +237,11 @@ export default function ChatPage() {
                 </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+            {/* --- SCROLL CONTAINER --- */}
+            <div 
+                ref={scrollContainerRef}
+                className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar"
+            >
                 {hasMore && (
                     <div className="flex justify-center pb-4">
                         <button 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { MessageCircle, X, Send, Minus, ChevronLeft, Hash, Plus, Search, Loader2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useChat } from '../../hooks/useChat';
@@ -16,6 +16,7 @@ export default function ChatBubble({ currentUserId, onClose, onRoomChange }: Cha
   const [activeRoom, setActiveRoom] = useState<string>('');
   const [activeRoomName, setActiveRoomName] = useState('');
   
+  // The 'useChat' hook now handles the sorting perfectly!
   const { messages, loading: loadingMessages, sendMessage, isSending, loadMore, hasMore } = useChat(activeRoom, currentUserId);
 
   const [activeChats, setActiveChats] = useState<any[]>([]); 
@@ -34,8 +35,39 @@ export default function ChatBubble({ currentUserId, onClose, onRoomChange }: Cha
   const [openDirectionX, setOpenDirectionX] = useState<'left' | 'right'>('left');
   const [openDirectionY, setOpenDirectionY] = useState<'up' | 'down'>('up');
 
+  // --- SCROLL REFS ---
   const bubbleRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null); // New ref for the container
+  const prevMessagesLength = useRef(0); // New ref to track history loading
+
+  // --- SMART SCROLL LOGIC (Prevents Jumping) ---
+  useLayoutEffect(() => {
+    if (view !== 'chat' || !scrollContainerRef.current) return;
+
+    const container = scrollContainerRef.current;
+    const currentLen = messages.length;
+    const prevLen = prevMessagesLength.current;
+
+    // 1. Initial Open or Room Change (0 -> N)
+    if (prevLen === 0 && currentLen > 0) {
+       messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    }
+    // 2. New Message Received (Small increase) -> Scroll to bottom ONLY if near bottom
+    else if (currentLen > prevLen && (currentLen - prevLen) < 5) {
+       const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
+       // Also scroll if I sent the message
+       const lastMsg = messages[messages.length - 1];
+       const isMe = lastMsg?.sender_id === currentUserId;
+
+       if (isNearBottom || isMe) {
+           messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+       }
+    }
+    // 3. Loaded History (Large increase) -> DO NOTHING (Stay where you are)
+    
+    prevMessagesLength.current = currentLen;
+  }, [messages, view]);
 
   useEffect(() => {
       onRoomChange(view === 'chat' ? activeRoom : null);
@@ -55,17 +87,18 @@ export default function ChatBubble({ currentUserId, onClose, onRoomChange }: Cha
     if (view === 'chat' && activeRoom) markAsRead(activeRoom);
   }, [messages.length, view, activeRoom]);
 
-  useEffect(() => {
-      if(view === 'chat') messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length, view, loadingMessages]);
-
   const fetchUnreadSenders = async () => {
       const { data } = await supabase.from('crm_messages').select('sender_id').eq('read', false).neq('sender_id', currentUserId).limit(500);
       if (data) setUnreadSenders(new Set(data.map(d => d.sender_id)));
   };
 
   const markAsRead = async (roomId: string) => {
-      await supabase.from('crm_messages').update({ read: true }).eq('room_id', roomId).neq('sender_id', currentUserId);
+      // Optimized: Only update if 'read' is actually false to save DB resources
+      await supabase.from('crm_messages')
+        .update({ read: true })
+        .eq('room_id', roomId)
+        .neq('sender_id', currentUserId)
+        .eq('read', false); 
   };
 
   const fetchAllUsers = async () => {
@@ -207,7 +240,10 @@ export default function ChatBubble({ currentUserId, onClose, onRoomChange }: Cha
 
                 {view === 'chat' && (
                     <>
-                        <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar bg-black/20">
+                        <div 
+                            ref={scrollContainerRef} // <--- Added this ref for Smart Scroll
+                            className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar bg-black/20"
+                        >
                             {hasMore && !loadingMessages && (
                                 <button onClick={loadMore} className="w-full text-center py-2 text-[9px] text-gray-500 hover:text-blue-400 transition uppercase font-bold tracking-tighter">↑ Load Previous</button>
                             )}

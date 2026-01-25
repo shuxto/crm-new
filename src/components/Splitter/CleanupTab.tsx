@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Trash2, FolderMinus, UserX, Loader2, AlertTriangle, Search, CheckSquare } from 'lucide-react';
+import ConfirmationModal from '../Team/ConfirmationModal'; // Reusing existing modals
+import SuccessModal from '../Team/SuccessModal'; // Reusing existing modals
 
 export default function CleanupTab() {
   const [folders, setFolders] = useState<any[]>([]);
@@ -12,32 +14,32 @@ export default function CleanupTab() {
   const [folderSearch, setFolderSearch] = useState('');
   const [agentSearch, setAgentSearch] = useState('');
 
-  // 1. Load Folders First
-  useEffect(() => {
-      const loadFolders = async () => {
-          const { data } = await supabase.rpc('get_moveable_folders');
-          if(data) setFolders(data);
-      };
-      loadFolders();
-  }, []);
+  // MODAL STATES
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
 
-  // 2. Load Agents based on Selected Folders
+  // 1. Load Folders
+  const loadFolders = async () => {
+      const { data } = await supabase.rpc('get_moveable_folders');
+      if(data) setFolders(data);
+  };
+
+  useEffect(() => { loadFolders(); }, []);
+
+  // 2. Load Agents
   useEffect(() => {
     if (selectedFolders.length === 0) { 
         setAgents([]); 
-        setSelectedAgents([]); // Clear agents if no folder selected
+        setSelectedAgents([]); 
         return; 
     }
-    
-    const loadAgents = async () => {
-        const { data } = await supabase.rpc('get_cleanup_stats', { target_folders: selectedFolders });
-        if(data) {
-            setAgents(data);
-            // REMOVED: setSelectedAgents(...) -> No more auto-select!
-        }
-    };
     loadAgents();
   }, [selectedFolders]);
+
+  const loadAgents = async () => {
+      const { data } = await supabase.rpc('get_cleanup_stats', { target_folders: selectedFolders });
+      if(data) setAgents(data);
+  };
 
   const toggleFolder = (name: string) => {
     if (selectedFolders.includes(name)) setSelectedFolders(prev => prev.filter(f => f !== name));
@@ -49,42 +51,49 @@ export default function CleanupTab() {
     else setSelectedAgents(prev => [...prev, id]);
   };
 
-  // NEW: Toggle Logic for Folders
   const toggleAllFolders = () => {
-      if (selectedFolders.length === folders.length) {
-          setSelectedFolders([]); // Deselect All
-      } else {
-          setSelectedFolders(folders.map(f => f.name)); // Select All
-      }
+      if (selectedFolders.length === folders.length) setSelectedFolders([]); 
+      else setSelectedFolders(folders.map(f => f.name)); 
   };
 
-  // NEW: Toggle Logic for Agents
   const toggleAllAgents = () => {
-      if (selectedAgents.length === agents.length) {
-          setSelectedAgents([]); // Deselect All
-      } else {
-          setSelectedAgents(agents.map(a => a.agent_id)); // Select All
-      }
+      if (selectedAgents.length === agents.length) setSelectedAgents([]); 
+      else setSelectedAgents(agents.map(a => a.agent_id)); 
   };
 
-  const handleExecute = async () => {
+  // TRIGGER CONFIRMATION MODAL
+  const handlePurgeClick = () => {
     if (selectedFolders.length === 0 || selectedAgents.length === 0) return;
-    if (!confirm(`⚠️ WARNING: This will unassign leads from ${selectedAgents.length} agents in ${selectedFolders.length} folders. Safe leads will remain. Proceed?`)) return;
+    setShowConfirm(true);
+  };
+
+  // EXECUTE ACTUAL PURGE
+  const executePurge = async () => {
     setProcessing(true);
     const { error } = await supabase.rpc('cleanup_leads_v2', {
         target_agent_ids: selectedAgents,
         target_folders: selectedFolders,
         target_status: targetStatus
     });
-    if (error) alert("Error: " + error.message);
-    else window.location.reload();
+    
     setProcessing(false);
+    setShowConfirm(false);
+
+    if (error) {
+        alert("Error: " + error.message);
+    } else {
+        // SUCCESS: Show Success Modal & Refresh Data
+        setShowSuccess(true);
+        loadFolders(); // Refresh folders
+        setAgents([]); // Clear old agent list
+        setSelectedAgents([]); // Reset selection
+        setSelectedFolders([]); // Reset selection
+    }
   };
 
   const filteredFolders = folders.filter(f => f.name.toLowerCase().includes(folderSearch.toLowerCase()));
   const filteredAgents = agents.filter(a => a.real_name.toLowerCase().includes(agentSearch.toLowerCase()));
 
-  // Count to be removed (Total - Safe) for selected agents
   const totalToRemove = agents
     .filter(a => selectedAgents.includes(a.agent_id))
     .reduce((sum, a) => sum + (a.total_count - a.safe_count), 0);
@@ -92,7 +101,7 @@ export default function CleanupTab() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
         
-        {/* 1. FOLDERS (First) */}
+        {/* 1. FOLDERS */}
         <div className="flex flex-col bg-black/20 backdrop-blur-md border border-white/5 rounded-3xl overflow-hidden h-150">
              <div className="p-5 border-b border-white/5 flex flex-col gap-4 bg-white/5">
                  <div className="flex items-center gap-3">
@@ -122,7 +131,7 @@ export default function CleanupTab() {
              </div>
         </div>
 
-        {/* 2. AGENTS (Shows Stats) */}
+        {/* 2. AGENTS */}
         <div className="flex flex-col bg-black/20 backdrop-blur-md border border-white/5 rounded-3xl overflow-hidden h-150">
              <div className="p-5 border-b border-white/5 flex flex-col gap-4 bg-white/5">
                  <div className="flex items-center gap-3">
@@ -149,7 +158,6 @@ export default function CleanupTab() {
                                     <span className={`text-sm font-bold ${isSelected ? 'text-white' : 'text-gray-400'}`}>{a.real_name}</span>
                                     {isSelected && <CheckSquare size={16} className="text-orange-500" />}
                                 </div>
-                                {/* STATS BADGES */}
                                 <div className="flex gap-2 text-[10px]">
                                     <div className="bg-white/10 px-2 py-0.5 rounded text-gray-300">Total: {a.total_count}</div>
                                     <div className="bg-green-500/20 px-2 py-0.5 rounded text-green-400 border border-green-500/20">Safe: {a.safe_count}</div>
@@ -186,12 +194,31 @@ export default function CleanupTab() {
                 </div>
             </div>
 
-            <button onClick={handleExecute} disabled={selectedFolders.length === 0 || selectedAgents.length === 0 || processing}
+            <button onClick={handlePurgeClick} disabled={selectedFolders.length === 0 || selectedAgents.length === 0 || processing}
                 className="w-full py-5 bg-red-600 hover:bg-red-500 text-white font-black uppercase tracking-[0.2em] rounded-xl shadow-[0_0_30px_rgba(220,38,38,0.4)] disabled:opacity-50 transition flex items-center justify-center gap-3 relative z-10 hover:scale-[1.02]">
                 {processing ? <Loader2 className="animate-spin" /> : <Trash2 />}
                 PURGE LEADS
             </button>
         </div>
+
+        {/* MODALS */}
+        <ConfirmationModal 
+            isOpen={showConfirm} 
+            title="CONFIRM PURGE PROTOCOL" 
+            message={`WARNING: You are about to unassign ${totalToRemove} leads from ${selectedAgents.length} agents. \n\nSafe leads (Deposits, Interested, etc) will remain touched.`} 
+            type="danger" 
+            onConfirm={executePurge} 
+            onClose={() => setShowConfirm(false)} 
+            loading={processing} 
+        />
+
+        <SuccessModal 
+            isOpen={showSuccess} 
+            title="PURGE COMPLETE" 
+            message="Leads have been successfully returned to the pool." 
+            type="success" // <--- ADD THIS LINE
+            onClose={() => setShowSuccess(false)} 
+        />
     </div>
   );
 }

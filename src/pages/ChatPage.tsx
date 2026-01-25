@@ -2,18 +2,19 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { Send, Users, Hash, Smile, Search, Loader2 } from 'lucide-react';
 import EmojiPicker, { Theme } from 'emoji-picker-react'; 
+import { useChat } from '../hooks/useChat';
+import { GLOBAL_CHAT_ID } from '../constants';
 
 export default function ChatPage() {
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [activeRoom, setActiveRoom] = useState<string>('00000000-0000-0000-0000-000000000000'); 
+  const [activeRoom, setActiveRoom] = useState<string>(GLOBAL_CHAT_ID); 
   const [activeRoomName, setActiveRoomName] = useState('Global Headquarters');
   
-  const [messages, setMessages] = useState<any[]>([]);
+  const { messages, loading, sendMessage, isSending, loadMore, hasMore } = useChat(activeRoom, currentUser?.id);
+
   const [users, setUsers] = useState<any[]>([]);
-  
   const [newMessage, setNewMessage] = useState('');
   const [showPicker, setShowPicker] = useState(false);
-  const [isSending, setIsSending] = useState(false);
   
   const [showTagList, setShowTagList] = useState(false);
   const [tagQuery, setTagQuery] = useState('');
@@ -31,16 +32,12 @@ export default function ChatPage() {
 
     const params = new URLSearchParams(window.location.search);
     const roomId = params.get('room_id');
-    if (roomId) {
-        setActiveRoom(roomId);
-    }
+    if (roomId) setActiveRoom(roomId);
   }, []);
 
-  // --- FIX: SYNC URL WITH ACTIVE ROOM ---
-  // This lets the Sidebar know exactly which room you are looking at
   useEffect(() => {
       const url = new URL(window.location.href);
-      if (activeRoom === '00000000-0000-0000-0000-000000000000') {
+      if (activeRoom === GLOBAL_CHAT_ID) {
           url.searchParams.delete('room_id');
       } else {
           url.searchParams.set('room_id', activeRoom);
@@ -49,39 +46,18 @@ export default function ChatPage() {
   }, [activeRoom]);
 
   useEffect(() => {
-    fetchMessages();
-    const sub = supabase.channel(`room-${activeRoom}`)
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'crm_messages', filter: `room_id=eq.${activeRoom}` }, () => {
-            fetchMessages(); 
-        })
-        .subscribe();
-    return () => { supabase.removeChannel(sub); };
-  }, [activeRoom]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  const fetchMessages = async () => {
-    const { data } = await supabase.from('crm_messages')
-        .select('*, sender:crm_users!sender_id(real_name)')
-        .eq('room_id', activeRoom)
-        .order('created_at', { ascending: true });
-    if(data) setMessages(data);
-  };
+    if (!loading) messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages.length, loading]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const val = e.target.value;
       setNewMessage(val);
-      
-      if (activeRoom !== '00000000-0000-0000-0000-000000000000') {
+      if (activeRoom !== GLOBAL_CHAT_ID) {
           setShowTagList(false);
           return;
       }
-
       const selectionStart = e.target.selectionStart;
       setCursorPosition(selectionStart);
-
       const lastAt = val.lastIndexOf('@', selectionStart);
       if (lastAt !== -1) {
           const query = val.substring(lastAt + 1, selectionStart);
@@ -98,12 +74,10 @@ export default function ChatPage() {
       const lastAt = newMessage.lastIndexOf('@', cursorPosition);
       const prefix = newMessage.substring(0, lastAt);
       const suffix = newMessage.substring(cursorPosition);
-      
       const inserted = `@${user.real_name} `;
       setNewMessage(`${prefix}${inserted}${suffix}`);
       setMentionIds(prev => [...prev, user.id]);
       setShowTagList(false);
-      
       if(inputRef.current) inputRef.current.focus();
   };
 
@@ -119,37 +93,25 @@ export default function ChatPage() {
     }
   };
 
-  const sendMessage = async (e?: React.FormEvent) => {
+  const handleSend = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!newMessage.trim() || !currentUser || isSending) return;
-
-    setIsSending(true);
-
-    await supabase.from('crm_messages').insert({
-        room_id: activeRoom,
-        sender_id: currentUser.id,
-        content: newMessage,
-        mentions: mentionIds,
-        reply_to_id: null 
-    });
-    
+    if (!newMessage.trim()) return;
+    await sendMessage(newMessage, mentionIds);
     setNewMessage('');
     setMentionIds([]);
     setShowPicker(false);
-    setIsSending(false); 
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        sendMessage();
+        handleSend();
     }
   };
 
   const renderMessageContent = (content: string) => {
       if (!content) return null;
       const parts = content.split(/(@[\w\s]+)/g);
-      
       return parts.map((part, index) => {
           if (part.startsWith('@')) {
               return (
@@ -170,8 +132,8 @@ export default function ChatPage() {
         <div className="w-72 bg-black/20 border border-white/5 rounded-3xl p-4 hidden md:flex flex-col">
             <h2 className="text-xl font-bold text-white mb-4 px-2">Chats</h2>
             <div 
-                onClick={() => { setActiveRoom('00000000-0000-0000-0000-000000000000'); setActiveRoomName('Global Headquarters'); }}
-                className={`p-3 mb-6 rounded-xl flex items-center gap-3 cursor-pointer transition ${activeRoom.includes('0000') ? 'bg-blue-600 text-white shadow-lg' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}
+                onClick={() => { setActiveRoom(GLOBAL_CHAT_ID); setActiveRoomName('Global Headquarters'); }}
+                className={`p-3 mb-6 rounded-xl flex items-center gap-3 cursor-pointer transition ${activeRoom === GLOBAL_CHAT_ID ? 'bg-blue-600 text-white shadow-lg' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}
             >
                 <div className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center"><Hash size={20} /></div>
                 <div>
@@ -222,6 +184,18 @@ export default function ChatPage() {
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+                {hasMore && (
+                    <div className="flex justify-center pb-4">
+                        <button 
+                            onClick={loadMore}
+                            disabled={loading}
+                            className="text-[10px] font-bold uppercase tracking-widest text-blue-400 bg-blue-500/5 border border-blue-500/20 px-4 py-2 rounded-full hover:bg-blue-500/10 transition flex items-center gap-2"
+                        >
+                            {loading && <Loader2 size={12} className="animate-spin" />}
+                            Load Earlier Messages
+                        </button>
+                    </div>
+                )}
                 {messages.map((msg, i) => {
                     const isMe = msg.sender_id === currentUser?.id;
                     const showAvatar = i === 0 || messages[i-1].sender_id !== msg.sender_id;
@@ -229,7 +203,7 @@ export default function ChatPage() {
 
                     return (
                         <div key={msg.id} className={`flex flex-col group ${isMe ? 'items-end' : 'items-start'}`}>
-                             <div className={`flex gap-3 max-w-[70%] ${isMe ? 'flex-row-reverse' : ''}`}>
+                            <div className={`flex gap-3 max-w-[70%] ${isMe ? 'flex-row-reverse' : ''}`}>
                                 <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-xs font-bold ${isMe ? 'bg-indigo-500 text-white' : 'bg-gray-700 text-gray-300'} ${!showAvatar ? 'opacity-0' : ''}`}>
                                     {msg.sender?.real_name?.substring(0,2).toUpperCase()}
                                 </div>
@@ -250,7 +224,7 @@ export default function ChatPage() {
                                         {new Date(msg.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
                                     </span>
                                 </div>
-                             </div>
+                            </div>
                         </div>
                     );
                 })}
@@ -262,47 +236,22 @@ export default function ChatPage() {
                     <div className="absolute bottom-20 left-14 bg-crm-bg/95 backdrop-blur-xl border border-white/20 rounded-xl shadow-[0_0_30px_rgba(0,0,0,0.5)] w-56 overflow-hidden z-50 animate-in slide-in-from-bottom-2">
                         <div className="px-3 py-2 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-white/10">Suggestions</div>
                         {filteredTags.map(u => (
-                            <div 
-                                key={u.id} 
-                                onClick={() => addTag(u)}
-                                className="px-3 py-2.5 hover:bg-blue-600 hover:text-white text-gray-300 text-xs cursor-pointer flex items-center gap-3 transition-colors border-b border-white/5 last:border-0"
-                            >
-                                <div className="w-6 h-6 bg-gray-700 rounded-full flex items-center justify-center font-bold text-[10px] text-white border border-white/10">
-                                    {u.real_name.substring(0,2).toUpperCase()}
-                                </div>
+                            <div key={u.id} onClick={() => addTag(u)} className="px-3 py-2.5 hover:bg-blue-600 hover:text-white text-gray-300 text-xs cursor-pointer flex items-center gap-3 transition-colors border-b border-white/5 last:border-0">
+                                <div className="w-6 h-6 bg-gray-700 rounded-full flex items-center justify-center font-bold text-[10px] text-white border border-white/10">{u.real_name.substring(0,2).toUpperCase()}</div>
                                 <span className="font-medium">{u.real_name}</span>
                             </div>
                         ))}
                     </div>
                 )}
-
                 {showPicker && (
                     <div className="absolute bottom-20 left-4 z-50 animate-in zoom-in-95">
                         <EmojiPicker onEmojiClick={(e) => setNewMessage(prev => prev + e.emoji)} theme={Theme.DARK} width={300} height={400} />
                     </div>
                 )}
-                
                 <form className="relative flex gap-2 items-end z-20">
-                    <button type="button" onClick={() => setShowPicker(!showPicker)} className="p-3 bg-white/5 hover:bg-white/10 rounded-xl text-gray-400 hover:text-yellow-400 transition">
-                        <Smile size={20} />
-                    </button>
-                    
-                    <textarea 
-                        ref={inputRef}
-                        className="w-full bg-black/40 border border-white/10 rounded-xl py-3 pl-4 pr-12 text-white focus:border-indigo-500 outline-none transition shadow-inner resize-none custom-scrollbar"
-                        placeholder={`Message ${activeRoomName}...`}
-                        value={newMessage}
-                        onChange={handleInputChange} 
-                        onKeyDown={handleKeyDown}
-                        rows={1}
-                        style={{ minHeight: '46px', maxHeight: '120px' }}
-                    />
-
-                    <button 
-                        onClick={(e) => { e.preventDefault(); sendMessage(); }} 
-                        disabled={isSending || !newMessage.trim()}
-                        className="p-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-xl transition shadow-lg shadow-indigo-500/20"
-                    >
+                    <button type="button" onClick={() => setShowPicker(!showPicker)} className="p-3 bg-white/5 hover:bg-white/10 rounded-xl text-gray-400 hover:text-yellow-400 transition"><Smile size={20} /></button>
+                    <textarea ref={inputRef} className="w-full bg-black/40 border border-white/10 rounded-xl py-3 pl-4 pr-12 text-white focus:border-indigo-500 outline-none transition shadow-inner resize-none custom-scrollbar" placeholder={`Message ${activeRoomName}...`} value={newMessage} onChange={handleInputChange} onKeyDown={handleKeyDown} rows={1} style={{ minHeight: '46px', maxHeight: '120px' }} />
+                    <button onClick={handleSend} disabled={isSending || !newMessage.trim()} className="p-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-xl transition shadow-lg shadow-indigo-500/20">
                         {isSending ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
                     </button>
                 </form>

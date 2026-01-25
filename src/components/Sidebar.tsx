@@ -9,6 +9,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { NavLink, useLocation } from 'react-router-dom';
 import NotificationBell from './NotificationBell'; 
+import { GLOBAL_CHAT_ID } from '../constants'; // <--- Import Constant
 
 interface SidebarProps {
   role: string;
@@ -40,7 +41,6 @@ export default function Sidebar({ role, username, isCollapsed, onToggle, onOpenB
         if (user) {
             setUserId(user.id);
             fetchMyRooms(user.id);
-            // FIX 2: Fetch Offline Unread Counts
             fetchUnreadCounts(user.id);
         }
     };
@@ -55,19 +55,13 @@ export default function Sidebar({ role, username, isCollapsed, onToggle, onOpenB
       }
   };
 
-  // FIX 2: Check for unread messages on login
   const fetchUnreadCounts = async (uid: string) => {
-      // 1. Check Global Unread (If your DB supports tracking this)
-      // For now, we only trust DMs for persistent unread status to avoid complex "last read" logic for global
-      
-      // 2. Check DM Unread
-      // Counts messages where I am the receiver (or in the room) and read is false
       const { count } = await supabase
         .from('crm_messages')
         .select('*', { count: 'exact', head: true })
         .eq('read', false)
         .neq('sender_id', uid)
-        .neq('room_id', '00000000-0000-0000-0000-000000000000'); // Exclude global to keep it simple
+        .neq('room_id', GLOBAL_CHAT_ID);
       
       if (count) setUnreadDM(count);
   };
@@ -76,38 +70,59 @@ export default function Sidebar({ role, username, isCollapsed, onToggle, onOpenB
       if (!userId) return;
 
       const sub = supabase.channel('sidebar-notifications')
+          // A. LISTEN FOR NEW MESSAGES (INCREMENT COUNT)
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'crm_messages' }, (payload) => {
               const newMsg = payload.new;
               if (newMsg.sender_id === userId) return;
 
+              // If I am currently looking at this room (Bubble or Page), ignore
               if (newMsg.room_id === activeBubbleRoom) return;
-
+              
               const currentPath = locationRef.current.pathname;
               const currentParams = new URLSearchParams(locationRef.current.search);
               const currentChatRoom = currentParams.get('room_id');
 
+              // Page Logic
               if (currentPath === '/chat') {
-                  if (newMsg.room_id === '00000000-0000-0000-0000-000000000000') {
-                      if (!currentChatRoom || currentChatRoom === '00000000-0000-0000-0000-000000000000') return; 
+                  if (newMsg.room_id === GLOBAL_CHAT_ID) {
+                      if (!currentChatRoom || currentChatRoom === GLOBAL_CHAT_ID) return; 
                       setUnreadGlobal(prev => prev + 1);
                       return;
                   }
                   if (currentChatRoom === newMsg.room_id) return; 
               } else {
-                  if (newMsg.room_id === '00000000-0000-0000-0000-000000000000') {
+                  if (newMsg.room_id === GLOBAL_CHAT_ID) {
                       setUnreadGlobal(prev => prev + 1);
                       return;
                   }
               }
 
+              // --- CRITICAL FIX: Handle New Conversations ---
               if (myRooms.has(newMsg.room_id)) {
                   setUnreadDM(prev => prev + 1);
+              } else if (newMsg.room_id !== GLOBAL_CHAT_ID) {
+                  // It's a DM room we didn't know about (brand new conversation)
+                  setUnreadDM(prev => prev + 1);
+                  setMyRooms(prev => new Set(prev).add(newMsg.room_id)); 
               }
+          })
+          // B. LISTEN FOR READ STATUS UPDATES (DECREMENT COUNT) -- SYNC FIX
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'crm_messages' }, (payload) => {
+             // If a message NOT sent by me...
+             if (payload.new.sender_id !== userId) {
+                 // ...changes from unread to read
+                 if (payload.old.read === false && payload.new.read === true) {
+                     // Decrement local count safely
+                     if (payload.new.room_id !== GLOBAL_CHAT_ID) {
+                        setUnreadDM(prev => Math.max(0, prev - 1));
+                     }
+                 }
+             }
           })
           .subscribe();
 
       return () => { supabase.removeChannel(sub); };
-  }, [userId, myRooms, activeBubbleRoom]);
+  }, [userId, myRooms, activeBubbleRoom]); // Removed unreadDM dependency to avoid stale closures
   
   const handleLogout = async () => {
     await supabase.auth.signOut();

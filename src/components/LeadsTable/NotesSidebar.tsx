@@ -13,7 +13,7 @@ interface Note {
 interface NotesSidebarProps {
   lead: { id: string; name: string; surname: string; note_count?: number };
   onClose: () => void;
-  currentUserEmail?: string;
+  currentUserEmail?: string; // This is actually receiving the ID now
   role: string;
   onNoteCountChange: (newCount: number) => void;
 }
@@ -24,6 +24,10 @@ export default function NotesSidebar({ lead, onClose, currentUserEmail, role, on
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
+  
+  // NEW: Store the Real Name here
+  const [currentRealName, setCurrentRealName] = useState('Agent');
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // --- HELPER: HANDLE CLOSING ANIMATION ---
@@ -35,6 +39,24 @@ export default function NotesSidebar({ lead, onClose, currentUserEmail, role, on
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
+
+  // 0. NEW: FETCH REAL NAME (Fixes the ID issue)
+  useEffect(() => {
+    const fetchMyName = async () => {
+        if (!currentUserEmail) return;
+        // currentUserEmail holds the ID now. Let's get the name.
+        const { data } = await supabase
+            .from('crm_users')
+            .select('real_name')
+            .eq('id', currentUserEmail) // Compare ID to ID
+            .single();
+        
+        if (data?.real_name) {
+            setCurrentRealName(data.real_name);
+        }
+    };
+    fetchMyName();
+  }, [currentUserEmail]);
 
   // 1. FETCH & SUBSCRIBE
   useEffect(() => {
@@ -87,7 +109,8 @@ export default function NotesSidebar({ lead, onClose, currentUserEmail, role, on
     setSending(true);
 
     const noteContent = newNote.trim();
-    const authorName = currentUserEmail?.split('@')[0] || 'Agent';
+    // CHANGED: Use the fetched name, NOT the email/ID
+    const authorName = currentRealName;
     
     // A. INSTANTLY UPDATE UI (Fake ID)
     const tempId = Math.random().toString(36).substr(2, 9);

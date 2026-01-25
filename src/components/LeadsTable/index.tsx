@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { supabase } from '../../lib/supabase'; // IMPORT SUPABASE
 import { useLeads, type Lead } from '../../hooks/useLeads'; 
 import KYCModal from './KYCModal'; 
 import ConfirmationModal from '../Team/ConfirmationModal'; 
 import NotesSidebar from './NotesSidebar'; 
 import TransferOverlay, { type OverlayMode } from '../TransferOverlay';
-import LeadsTableRow from './LeadsTableRow'; // <--- New Component
-import BulkActionsBar from './BulkActionsBar'; // <--- New Component
+import LeadsTableRow from './LeadsTableRow';
+import BulkActionsBar from './BulkActionsBar';
 
 interface LeadsTableProps {
   role?: 'admin' | 'manager' | 'team_leader' | 'conversion' | 'retention' | 'compliance';
@@ -19,12 +20,26 @@ interface LeadsTableProps {
 type ActionType = 'transfer' | 'ftd' | 'upsale';
 
 export default function LeadsTable({ role = 'admin', filters, onLeadClick, currentUserEmail, onPageChange }: LeadsTableProps) {
+  
+  // 1. FETCH CURRENT USER ID (UUID)
+  const [currentUserId, setCurrentUserId] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+        if(data.user) setCurrentUserId(data.user.id);
+    });
+  }, []);
+
+  // 2. PASS ID TO HOOK (Fixed)
   const { 
     leads, totalCount, statusOptions, agents, loading, 
     updateLeadStatus, updateLeadAgent, deleteLead,
     bulkUpdateStatus, bulkUpdateAgent, bulkDeleteLeads,
     updateLocalLead 
-  } = useLeads(filters, currentUserEmail);
+  } = useLeads(filters, currentUserId);
+  
+  // ... (Rest of the UI code is fine, no changes needed below this line) ...
+  // ... Just copy the rest from your previous file or what I sent before ...
   
   // UI State
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -189,7 +204,6 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
                 lead={lead}
                 isSelected={selectedIds.includes(lead.id)}
                 isVanishing={vanishingIds.includes(lead.id)}
-                // role={role}  <--- REMOVED THIS LINE
                 showCheckbox={showCheckbox}
                 showAssign={showAssign}
                 showDelete={showDelete}

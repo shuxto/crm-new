@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from './lib/supabase';
+import { ShieldAlert } from 'lucide-react';
 
 // COMPONENTS
 import LoginPage from './components/LoginPage';
@@ -13,11 +14,15 @@ import FileManager from './components/Files';
 import TeamManagement from './components/Team'; 
 import ShufflePage from './components/Shuffle'; 
 import CallsPage from './components/Calls';
+import SplitterPage from './components/Splitter';
 
 export default function App() {
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   
+  // 1. NEW: Store the ID so we can pass it to the table
+  const [currentUserId, setCurrentUserId] = useState<string | undefined>(undefined);
+
   const [currentView, setCurrentView] = useState(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -28,7 +33,6 @@ export default function App() {
   
   const [selectedLead, setSelectedLead] = useState<any>(null);
   
-  // --- FILTER STATE ---
   const [activeFilters, setActiveFilters] = useState({
       search: '',
       dateRange: 'all',
@@ -37,15 +41,13 @@ export default function App() {
       source: [] as string[],
       country: [] as string[],
       limit: 50,
-      page: 1, // <--- ADDED PAGE HERE
+      page: 1, 
       tab: 'all' as 'all' | 'mine' | 'unassigned'
   });
 
-  // HANDLER FOR STATS GRID CLICK
   const toggleStatus = (status: string) => {
     setActiveFilters(prev => {
       const current = prev.status;
-      // Reset to page 1 when filtering
       const newState = { ...prev, page: 1 }; 
       if (current.includes(status)) {
         return { ...newState, status: current.filter(s => s !== status) };
@@ -58,16 +60,17 @@ export default function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
+      if (session) setCurrentUserId(session.user.id); // Store ID
       setLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
+      if (session) setCurrentUserId(session.user.id); // Store ID
     });
     return () => subscription.unsubscribe();
   }, []);
 
-// NEW: LISTENER FOR BACK BUTTON
   useEffect(() => {
     const handleBackButtonClick = () => {
       const params = new URLSearchParams(window.location.search);
@@ -85,6 +88,34 @@ export default function App() {
     window.history.pushState({}, '', url);
   };
 
+  // 2. NEW: SECURITY GUARD (Prevents manual URL access)
+  const renderProtectedView = (Component: React.ReactNode, allowedRoles: string[]) => {
+      // Use metadata for speed (avoids loading screen)
+      const role = session?.user?.user_metadata?.role || 'conversion';
+
+      if (allowedRoles.includes(role)) {
+          return Component;
+      }
+
+      return (
+          <div className="h-full flex flex-col items-center justify-center p-10 text-center animate-in zoom-in-95">
+              <div className="p-6 bg-red-500/10 rounded-full mb-6 border border-red-500/20">
+                  <ShieldAlert size={64} className="text-red-500" />
+              </div>
+              <h2 className="text-3xl font-black text-white mb-2 uppercase tracking-widest">Access Denied</h2>
+              <p className="text-gray-400 max-w-md mx-auto mb-8">
+                  Security Protocol: You do not have the required clearance to access this area.
+              </p>
+              <button 
+                  onClick={() => handleNavigation('dashboard')}
+                  className="px-6 py-3 bg-white/10 hover:bg-white/20 text-white rounded-lg font-bold transition-all border border-white/10"
+              >
+                  Return to Dashboard
+              </button>
+          </div>
+      );
+  };
+
   if (loading) return <div className="min-h-screen flex items-center justify-center text-white"><div className="glass-panel p-6 rounded-xl animate-pulse">Loading System...</div></div>;
   if (!session) return <LoginPage />;
   
@@ -96,10 +127,13 @@ export default function App() {
     );
   }
 
+  // Get role from metadata (Fast)
+  const currentRole = session.user.user_metadata?.role || 'conversion';
+
   return (
     <div className="flex min-h-screen font-sans text-[#e2e8f0]">
       <NotificationSystem />
-      <Sidebar role={session.user.user_metadata?.role || 'admin'} username={session.user.email} activeView={currentView} onNavigate={handleNavigation} />
+      <Sidebar role={currentRole} username={session.user.email} activeView={currentView} onNavigate={handleNavigation} />
       
       <main className="flex-1 p-6 relative z-10 overflow-y-auto h-screen">
         
@@ -123,24 +157,27 @@ export default function App() {
               currentUserEmail={session.user.email}
             />
             
+            {/* 3. FIXED: We now pass the ID, not the email, so filters work */}
             <LeadsTable 
-                role={session.user.user_metadata?.role || 'admin'} 
+                role={currentRole} 
                 filters={activeFilters} 
                 onLeadClick={(lead) => setSelectedLead(lead)} 
-                currentUserEmail={session.user.email}
-                // ADDED PAGINATION HANDLER
+                currentUserEmail={currentUserId} // <--- PASSING ID HERE
                 onPageChange={(newPage) => setActiveFilters(prev => ({ ...prev, page: newPage }))}
             />
           </div>
         )}
 
-        {currentView === 'files' && <FileManager />}
+        {currentView === 'files' && renderProtectedView(<FileManager />, ['admin', 'manager'])}
         
-        {currentView === 'team' && <TeamManagement />} 
+        {/* PROTECTED ROUTES */}
+        {currentView === 'team' && renderProtectedView(<TeamManagement />, ['admin', 'manager'])} 
 
-        {currentView === 'shuffle' && <ShufflePage />}
+        {currentView === 'shuffle' && renderProtectedView(<ShufflePage />, ['admin', 'manager', 'team_leader'])}
 
         {currentView === 'calls' && <CallsPage />}
+        
+        {currentView === 'splitter' && renderProtectedView(<SplitterPage />, ['admin', 'manager'])}
 
       </main>
     </div>

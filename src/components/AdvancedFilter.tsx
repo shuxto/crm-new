@@ -16,6 +16,8 @@ interface AdvancedFilterProps {
   currentFilters: any;
   onFilterChange: (filters: any) => void;
   currentUserEmail?: string; 
+  role?: string;   
+  userId?: string; 
 }
 
 // --- SUB-COMPONENT: CUSTOM MULTI-SELECT DROPDOWN ---
@@ -104,33 +106,83 @@ const MultiSelectDropdown = ({ label, icon: Icon, options, selected, onChange, w
 };
 
 // --- MAIN COMPONENT ---
-export default function AdvancedFilter({ currentFilters, onFilterChange }: AdvancedFilterProps) {
-  // We need maps to convert ID <-> Name because DB uses IDs but Humans read Names
-  const [agentMap, setAgentMap] = useState<Record<string, string>>({}); // ID -> Name
-  const [nameToIdMap, setNameToIdMap] = useState<Record<string, string>>({}); // Name -> ID
+export default function AdvancedFilter({ currentFilters, onFilterChange, role = 'conversion', userId }: AdvancedFilterProps) {
+  const [agentMap, setAgentMap] = useState<Record<string, string>>({}); 
+  const [nameToIdMap, setNameToIdMap] = useState<Record<string, string>>({}); 
 
   const [options, setOptions] = useState({
     sources: [] as string[],
     countries: [] as string[],
-    agents: [] as string[], // Now stores Names
+    agents: [] as string[],
     statuses: [] as string[]
   });
 
   useEffect(() => {
     async function loadOptions() {
-      // 1. Fetch Sources
-      const { data: sData } = await supabase.from('crm_leads').select('source_file');
+      // 1. FETCH ALLOWED SOURCES (DB Permission)
+      let allowedFolders: string[] = [];
+      if (userId) {
+        const { data: userData } = await supabase
+            .from('crm_users')
+            .select('allowed_sources')
+            .eq('id', userId)
+            .single();
+        
+        if (userData?.allowed_sources) {
+            allowedFolders = userData.allowed_sources.split(',').map((s: string) => s.trim());
+        }
+      }
+
+      // 2. DETERMINE FOLDER OPTIONS BASED ON ROLE
+      let folderOptions: string[] = [];
+
+      if (role === 'admin') {
+          // Admin sees EVERYTHING
+          const { data } = await supabase.from('crm_leads').select('source_file');
+          folderOptions = Array.from(new Set(data?.map(x => x.source_file).filter(Boolean))) as string[];
+      } 
+      else if (role === 'manager') {
+          // Manager: Restricted STRICTLY to allowed_sources (as requested)
+          // We fetch all available to ensure we don't show "phantom" allowed folders
+          const { data } = await supabase.from('crm_leads').select('source_file');
+          const allFolders = Array.from(new Set(data?.map(x => x.source_file).filter(Boolean))) as string[];
+          folderOptions = allFolders.filter(f => allowedFolders.includes(f));
+      } 
+      else {
+          // Agents (Conversion, Retention, Compliance, etc.)
+          // Logic: Show folders from leads ASSIGNED to them + any explicit allowed_sources
+          const mySourceSet = new Set<string>(allowedFolders);
+
+          if (userId) {
+              // Fetch only the sources of leads assigned to this user
+              const { data: myLeads } = await supabase
+                  .from('crm_leads')
+                  .select('source_file')
+                  .eq('assigned_to', userId);
+              
+              myLeads?.forEach(l => {
+                  if (l.source_file) mySourceSet.add(l.source_file);
+              });
+          }
+          folderOptions = Array.from(mySourceSet);
+      }
       
-      // 2. Fetch Countries
+      // 3. Fetch Countries
       const { data: cData } = await supabase.from('crm_leads').select('country');
       
-      // 3. Fetch Agents (USERS) - FILTERED BY ROLE
-      // Only get Conversion, Retention, and Team Leaders
-      const { data: uData } = await supabase
+      // 4. Fetch Agents (USERS) - FILTERED BY ROLE
+      let agentQuery = supabase
         .from('crm_users')
         .select('id, real_name')
-        .in('role', ['conversion', 'retention', 'team_leader']) // <--- THE FIX
+        .in('role', ['conversion', 'retention', 'team_leader']) 
         .order('real_name');
+
+      // --- PERMISSION CHECK: AGENTS ---
+      if (role === 'team_leader' && userId) {
+        agentQuery = agentQuery.eq('team_leader_id', userId);
+      }
+      
+      const { data: uData } = await agentQuery;
       
       // Build Agent Maps
       const agNames: string[] = [];
@@ -149,7 +201,7 @@ export default function AdvancedFilter({ currentFilters, onFilterChange }: Advan
       setAgentMap(idMap);
       setNameToIdMap(revMap);
 
-      // 4. Fetch Statuses
+      // 5. Fetch Statuses
       const { data: stData } = await supabase
         .from('crm_statuses')
         .select('label')
@@ -157,21 +209,20 @@ export default function AdvancedFilter({ currentFilters, onFilterChange }: Advan
         .order('order_index', { ascending: true });
 
       setOptions({
-        sources: Array.from(new Set(sData?.map(x => x.source_file).filter(Boolean))) as string[],
+        sources: folderOptions,
         countries: Array.from(new Set(cData?.map(x => x.country).filter(Boolean))) as string[],
         agents: agNames,
         statuses: stData?.map(x => x.label) || []
       });
     }
     loadOptions();
-  }, []);
+  }, [userId, role]); 
 
   const updateFilter = (key: keyof FilterState, value: any) => {
     const newFilters = { ...currentFilters, [key]: value };
     onFilterChange(newFilters);
   };
 
-  // Special handler for Agent changes (Convert Names back to IDs)
   const handleAgentChange = (selectedNames: string[]) => {
       const selectedIds = selectedNames.map(name => nameToIdMap[name]).filter(Boolean);
       updateFilter('agent', selectedIds);
@@ -188,8 +239,9 @@ export default function AdvancedFilter({ currentFilters, onFilterChange }: Advan
     });
   };
 
-  // Convert currently selected IDs to Names for the dropdown display
   const selectedAgentNames = (currentFilters.agent || []).map((id: string) => agentMap[id]).filter(Boolean);
+
+  const showAgentsFilter = ['admin', 'manager', 'team_leader'].includes(role);
 
   return (
     <div className="glass-panel p-5 rounded-xl mb-6 shadow-xl relative z-40 animate-in slide-in-from-top-4">
@@ -231,16 +283,18 @@ export default function AdvancedFilter({ currentFilters, onFilterChange }: Advan
           width="w-40"
         />
 
-        {/* 4. AGENTS (FIXED & FILTERED) */}
-        <MultiSelectDropdown 
-          label="Agents" 
-          icon={Users} 
-          options={options.agents} 
-          selected={selectedAgentNames} // Passing Names
-          onChange={handleAgentChange}  // Receiving Names -> Converting to IDs
-        />
+        {/* 4. AGENTS (CONDITIONAL VISIBILITY) */}
+        {showAgentsFilter && (
+            <MultiSelectDropdown 
+            label="Agents" 
+            icon={Users} 
+            options={options.agents} 
+            selected={selectedAgentNames} 
+            onChange={handleAgentChange} 
+            />
+        )}
 
-        {/* 5. STATUS (Dynamic) */}
+        {/* 5. STATUS */}
         <MultiSelectDropdown 
           label="Statuses" 
           icon={Layers} 

@@ -10,6 +10,7 @@ import { supabase } from '../lib/supabase';
 import { NavLink, useLocation } from 'react-router-dom';
 import NotificationBell from './NotificationBell'; 
 import { GLOBAL_CHAT_ID } from '../constants';
+import ProfileSettingsModal from './ProfileSettingsModal'; // <--- NEW IMPORT
 
 interface SidebarProps {
   role: string;
@@ -28,6 +29,10 @@ export default function Sidebar({ role, username, isCollapsed, onToggle, onOpenB
   const [unreadDM, setUnreadDM] = useState(0);
   const [myRooms, setMyRooms] = useState<Set<string>>(new Set());
 
+  // --- NEW STATE FOR PROFILE ---
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+
   const location = useLocation();
   const locationRef = useRef(location);
 
@@ -42,9 +47,25 @@ export default function Sidebar({ role, username, isCollapsed, onToggle, onOpenB
             setUserId(user.id);
             fetchMyRooms(user.id);
             fetchUnreadCounts(user.id);
+            
+            // --- NEW: FETCH AVATAR ---
+            const { data } = await supabase.from('crm_users').select('avatar_url').eq('id', user.id).single();
+            if (data) setAvatarUrl(data.avatar_url);
         }
     };
     init();
+
+    // --- NEW: LISTEN FOR UPDATES ---
+    const handleProfileUpdate = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+            const { data } = await supabase.from('crm_users').select('avatar_url').eq('id', user.id).single();
+            if (data) setAvatarUrl(data.avatar_url);
+        }
+    };
+    window.addEventListener('crm-profile-update', handleProfileUpdate);
+    return () => window.removeEventListener('crm-profile-update', handleProfileUpdate);
+
   }, []);
 
   const fetchMyRooms = async (uid: string) => {
@@ -57,7 +78,6 @@ export default function Sidebar({ role, username, isCollapsed, onToggle, onOpenB
 
   const fetchUnreadCounts = async (uid: string) => {
       // Robust Fetch: Get all unread messages and filter in JS
-      // This avoids 400 errors if the DB schema is slightly off regarding UUID types
       const { data } = await supabase
         .from('crm_messages')
         .select('sender_id, room_id') 
@@ -255,15 +275,24 @@ export default function Sidebar({ role, username, isCollapsed, onToggle, onOpenB
 
              {!isCollapsed ? (
                 <div className="bg-black/20 p-4 rounded-xl animate-in fade-in duration-300">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="w-8 h-8 rounded-full bg-linear-to-br from-gray-700 to-gray-900 border border-white/10 flex items-center justify-center shrink-0">
-                      <Shield size={14} className="text-gray-400" />
+                  {/* --- CLICKABLE PROFILE HEADER --- */}
+                  <div 
+                    onClick={() => setShowProfileModal(true)} 
+                    className="flex items-center gap-3 mb-4 cursor-pointer hover:bg-white/5 p-2 -mx-2 rounded-lg transition group"
+                  >
+                    <div className="w-8 h-8 rounded-full bg-linear-to-br from-gray-700 to-gray-900 border border-white/10 flex items-center justify-center shrink-0 overflow-hidden relative">
+                      {avatarUrl ? (
+                          <img src={avatarUrl} alt="Me" className="w-full h-full object-cover" />
+                      ) : (
+                          <Shield size={14} className="text-gray-400 group-hover:text-white transition" />
+                      )}
                     </div>
                     <div className="flex-1 overflow-hidden">
-                      <p className="text-sm font-bold text-white truncate">{username}</p>
+                      <p className="text-sm font-bold text-white truncate group-hover:text-blue-400 transition">{username}</p>
                       <p className="text-xs text-gray-500 capitalize truncate">{role}</p>
                     </div>
                   </div>
+                  
                   <button 
                     onClick={handleLogout}
                     className="w-full flex items-center justify-center gap-2 p-2 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition-all text-sm font-medium border border-transparent hover:border-red-500/20 cursor-pointer"
@@ -274,8 +303,17 @@ export default function Sidebar({ role, username, isCollapsed, onToggle, onOpenB
                 </div>
              ) : (
                 <div className="flex flex-col gap-4 items-center animate-in fade-in duration-300">
-                    <div className="w-8 h-8 rounded-full bg-gray-800 border border-white/10 flex items-center justify-center shrink-0" title={username}>
-                      <Shield size={14} className="text-gray-400" />
+                    {/* --- COLLAPSED AVATAR --- */}
+                    <div 
+                        onClick={() => setShowProfileModal(true)}
+                        className="w-8 h-8 rounded-full bg-gray-800 border border-white/10 flex items-center justify-center shrink-0 cursor-pointer hover:border-blue-500 overflow-hidden" 
+                        title={username}
+                    >
+                      {avatarUrl ? (
+                          <img src={avatarUrl} alt="Me" className="w-full h-full object-cover" />
+                      ) : (
+                          <Shield size={14} className="text-gray-400" />
+                      )}
                     </div>
                     <button 
                         onClick={handleLogout}
@@ -289,6 +327,9 @@ export default function Sidebar({ role, username, isCollapsed, onToggle, onOpenB
           </div>
         </div>
       </aside>
+
+      {/* --- PROFILE MODAL --- */}
+      {showProfileModal && <ProfileSettingsModal onClose={() => setShowProfileModal(false)} />}
     </>
   );
 }

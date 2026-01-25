@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 
 // --- HELPER: SORT & DEDUPE ---
-// Moved OUTSIDE the hook so it is a stable reference (never causes re-renders)
 const mergeAndSortMessages = (currentMessages: any[], newBatch: any[]) => {
   const combined = [...currentMessages, ...newBatch];
   const uniqueMap = new Map();
@@ -41,7 +40,8 @@ export function useChat(roomId: string, currentUserId: string | null) {
       
       const { data, error } = await supabase
         .from('crm_messages')
-        .select('*, sender:crm_users(real_name)')
+        // UPDATED: Added avatar_url to the select
+        .select('*, sender:crm_users(real_name, avatar_url)')
         .eq('room_id', roomId)
         .order('created_at', { ascending: false }) 
         .order('id', { ascending: false })
@@ -65,8 +65,13 @@ export function useChat(roomId: string, currentUserId: string | null) {
         table: 'crm_messages', 
         filter: `room_id=eq.${roomId}` 
       }, async (payload) => {
-        // Fetch sender name
-        const { data: senderData } = await supabase.from('crm_users').select('real_name').eq('id', payload.new.sender_id).single();
+        // UPDATED: Fetch sender name AND avatar_url
+        const { data: senderData } = await supabase
+            .from('crm_users')
+            .select('real_name, avatar_url')
+            .eq('id', payload.new.sender_id)
+            .single();
+            
         const newMsg: any = { ...payload.new, sender: senderData };
         
         setMessages(prev => mergeAndSortMessages(prev, [newMsg]));
@@ -90,7 +95,8 @@ export function useChat(roomId: string, currentUserId: string | null) {
 
     const { data, error } = await supabase
       .from('crm_messages')
-      .select('*, sender:crm_users(real_name)')
+      // UPDATED: Added avatar_url to the select
+      .select('*, sender:crm_users(real_name, avatar_url)')
       .eq('room_id', roomId)
       .order('created_at', { ascending: false })
       .order('id', { ascending: false }) 

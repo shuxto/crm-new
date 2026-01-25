@@ -16,6 +16,7 @@ interface UpdatePayload {
     full_name?: string;
     password?: string;
     role?: string;
+    avatar_url?: string; // <--- NEW: Added this
   };
 }
 
@@ -45,13 +46,16 @@ serve(async (req) => {
       .eq('id', caller.id)
       .maybeSingle()
 
-    const effectiveRole = callerData?.role || caller.user_metadata.role
-    if (!['admin', 'manager'].includes(effectiveRole)) {
-        throw new Error('Permission denied: You are not an Admin or Manager')
-    }
-
-    // 2. Get Updates (Typed)
+    // 2. Get Updates (Typed) -- MOVED UP to support Self-Service check
     const { target_id, updates } = await req.json() as UpdatePayload
+
+    const effectiveRole = callerData?.role || caller.user_metadata.role
+    const isSelfUpdate = caller.id === target_id; // <--- NEW: Check if updating own profile
+
+    // MODIFIED PERMISSION CHECK: Allow Admins/Managers OR Self-Update
+    if (!['admin', 'manager'].includes(effectiveRole) && !isSelfUpdate) {
+        throw new Error('Permission denied: You can only edit your own profile.')
+    }
 
     // 3. Prepare Updates (Using Record instead of 'any' to satisfy linter)
     const authUpdates: Record<string, unknown> = {}
@@ -69,11 +73,22 @@ serve(async (req) => {
         metaUpdates.real_name = updates.full_name;
     }
     
-    if (updates.role) {
+    // MODIFIED ROLE CHECK: Only Admins/Managers can change roles
+    if (updates.role && ['admin', 'manager'].includes(effectiveRole)) {
         // Merge role into metadata if needed, or just set it
         const currentMeta = (authUpdates.user_metadata as Record<string, unknown>) || {};
         authUpdates.user_metadata = { ...currentMeta, role: updates.role };
         metaUpdates.role = updates.role;
+    }
+
+    // --- NEW: HANDLE AVATAR ---
+    if (updates.avatar_url) {
+        // Save to Metadata (optional, but good for auth session)
+        const currentMeta = (authUpdates.user_metadata as Record<string, unknown>) || {};
+        authUpdates.user_metadata = { ...currentMeta, avatar_url: updates.avatar_url };
+        
+        // Save to Public Table (Critical for UI)
+        metaUpdates.avatar_url = updates.avatar_url;
     }
 
     // 4. Update Auth User

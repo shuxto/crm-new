@@ -12,6 +12,7 @@ interface AgentStats {
   role: string;
   moveable_count: number;
   safe_count: number;
+  avatar_url?: string; // <--- Added
 }
 
 export default function ShufflePage() {
@@ -20,7 +21,7 @@ export default function ShufflePage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [shuffling, setShuffling] = useState(false);
   
-  // NEW: Search State
+  // Search State
   const [search, setSearch] = useState('');
 
   // Modals
@@ -31,9 +32,30 @@ export default function ShufflePage() {
   // Fetch Stats
   const fetchStats = async () => {
     setLoading(true);
-    const { data, error } = await supabase.rpc('get_shuffle_stats');
-    if (error) setErrorMsg(error.message);
-    else setAgents(data || []);
+    // 1. Get Shuffle Stats
+    const { data: statsData, error } = await supabase.rpc('get_shuffle_stats');
+    
+    if (error) {
+        setErrorMsg(error.message);
+    } else if (statsData) {
+        // 2. Fetch Avatars for these users
+        const userIds = statsData.map((s: any) => s.user_id);
+        const { data: userData } = await supabase
+            .from('crm_users')
+            .select('id, avatar_url')
+            .in('id', userIds);
+
+        // 3. Merge Data
+        const avatarMap = new Map();
+        userData?.forEach((u: any) => avatarMap.set(u.id, u.avatar_url));
+
+        const mergedAgents = statsData.map((s: any) => ({
+            ...s,
+            avatar_url: avatarMap.get(s.user_id)
+        }));
+
+        setAgents(mergedAgents);
+    }
     setLoading(false);
   };
 
@@ -45,18 +67,13 @@ export default function ShufflePage() {
     else setSelectedIds([...selectedIds, id]);
   };
 
-  // UPDATED: Toggle all now respects the search filter
+  // Toggle all now respects the search filter
   const toggleAll = (checked: boolean) => {
     if (checked) {
-      // Only select visible agents if searching, or all if not
       const visibleIds = filteredAgents.map(a => a.user_id);
-      // Combine with existing selections to avoid losing unchecked invisible ones if needed, 
-      // but usually "Select All" implies "Select All Visible". 
-      // Let's keep it simple: Select all currently visible.
       const newSelection = [...new Set([...selectedIds, ...visibleIds])];
       setSelectedIds(newSelection);
     } else {
-      // Deselect all visible
       const visibleIds = filteredAgents.map(a => a.user_id);
       setSelectedIds(selectedIds.filter(id => !visibleIds.includes(id)));
     }
@@ -124,7 +141,6 @@ export default function ShufflePage() {
             </div>
 
             <div className="flex flex-col sm:flex-row items-stretch gap-3 w-full md:w-auto">
-                {/* NEW: Search Input */}
                 <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
                     <input 
@@ -141,7 +157,6 @@ export default function ShufflePage() {
                         type="checkbox" 
                         className="w-5 h-5 rounded bg-gray-800 border-gray-600 accent-cyan-500"
                         onChange={(e) => toggleAll(e.target.checked)}
-                        // Check if all VISIBLE agents are selected
                         checked={filteredAgents.length > 0 && filteredAgents.every(a => selectedIds.includes(a.user_id))}
                     />
                     <span className="font-bold text-gray-300 group-hover:text-white">Select All</span>
@@ -158,7 +173,7 @@ export default function ShufflePage() {
         </div>
       )}
 
-      {/* AGENT GRID - UPDATED: Added filteredAgents and adjusted sizing */}
+      {/* AGENT GRID */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 mb-8">
         {filteredAgents.map(agent => {
             const isRet = agent.role === 'retention';
@@ -176,14 +191,18 @@ export default function ShufflePage() {
                         }
                     `}
                 >
-                    {/* Header Row - UPDATED: Compact Sizing */}
+                    {/* Header Row */}
                     <div className="flex items-start justify-between mb-3">
                         <div className="flex items-center gap-2">
-                            {/* Avatar: w-8 h-8 (was w-10 h-10) */}
-                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs shadow-inner
+                            {/* UPDATED: Avatar Display */}
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs shadow-inner overflow-hidden
                                 ${isRet ? 'bg-fuchsia-500/10 text-fuchsia-400' : 'bg-cyan-500/10 text-cyan-400'}
                             `}>
-                                {agent.real_name.substring(0, 2).toUpperCase()}
+                                {agent.avatar_url ? (
+                                    <img src={agent.avatar_url} alt={agent.real_name} className="w-full h-full object-cover" />
+                                ) : (
+                                    agent.real_name.substring(0, 2).toUpperCase()
+                                )}
                             </div>
                             <div className="overflow-hidden">
                                 <div className={`font-bold text-sm truncate ${isSelected ? 'text-white' : 'text-gray-300'}`}>
@@ -208,10 +227,9 @@ export default function ShufflePage() {
                         </div>
                     </div>
 
-                    {/* Stats Row - UPDATED: Compact Sizing */}
+                    {/* Stats Row */}
                     <div className="flex items-center justify-between text-xs pt-2 border-t border-white/5 group-hover:border-white/10 transition">
                         <div>
-                            {/* Number: text-lg (was text-xl) */}
                             <span className="block font-mono text-white text-lg leading-none mb-0.5 text-shadow-glow">
                                 {agent.moveable_count.toLocaleString()}
                             </span>
@@ -253,7 +271,7 @@ export default function ShufflePage() {
       {/* CONFIRMATION MODAL */}
       <ConfirmationModal 
         isOpen={confirmState.isOpen}
-        type="danger" // Red warning for dangerous action
+        type="danger" 
         title={confirmState.title}
         message={confirmState.message}
         onClose={() => setConfirmState({ ...confirmState, isOpen: false })}

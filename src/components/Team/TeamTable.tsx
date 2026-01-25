@@ -68,11 +68,15 @@ export default function TeamTable({
               return (
                 <tr key={user.id} className="group hover:bg-white/5 transition duration-200">
                   
-                  {/* 1. USER */}
+                  {/* 1. USER - UPDATED WITH AVATAR */}
                   <td className="p-5">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-linear-to-br from-gray-700 to-gray-800 flex items-center justify-center text-white font-bold shadow-inner group-hover:scale-105 transition border border-gray-600/30">
-                        {user.real_name?.substring(0, 2).toUpperCase() || 'UN'}
+                      <div className="w-10 h-10 rounded-xl overflow-hidden bg-linear-to-br from-gray-700 to-gray-800 flex items-center justify-center text-white font-bold shadow-inner group-hover:scale-105 transition border border-gray-600/30">
+                        {user.avatar_url ? (
+                            <img src={user.avatar_url} alt={user.real_name} className="w-full h-full object-cover" />
+                        ) : (
+                            user.real_name?.substring(0, 2).toUpperCase() || 'UN'
+                        )}
                       </div>
                       <div>
                         <div className="text-white font-bold group-hover:text-cyan-400 transition">{user.real_name || 'Unknown'}</div>

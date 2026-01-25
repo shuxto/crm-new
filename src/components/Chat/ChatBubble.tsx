@@ -71,7 +71,20 @@ export default function ChatBubble({ currentUserId, onClose, onRoomChange }: Cha
     const fetchActiveChats = async () => {
         try {
             const { data, error } = await supabase.rpc('get_my_active_dms', { p_user_id: currentUserId });
-            if (!error && data) setActiveChats(data);
+            // Fetch avatar URLs for these active chats
+            if (!error && data) {
+                const userIds = data.map((c: any) => c.other_user_id);
+                const { data: userData } = await supabase.from('crm_users').select('id, avatar_url').in('id', userIds);
+                
+                const avatarMap = new Map();
+                userData?.forEach((u: any) => avatarMap.set(u.id, u.avatar_url));
+
+                const chatsWithAvatars = data.map((c: any) => ({
+                    ...c,
+                    avatar_url: avatarMap.get(c.other_user_id)
+                }));
+                setActiveChats(chatsWithAvatars);
+            }
         } catch (e) { console.error(e); }
     };
     fetchActiveChats();
@@ -144,7 +157,8 @@ export default function ChatBubble({ currentUserId, onClose, onRoomChange }: Cha
   };
 
   const fetchAllUsers = async () => {
-      const { data } = await supabase.from('crm_users').select('id, real_name, role').neq('id', currentUserId).order('real_name');
+      // UPDATED: Fetch avatar_url too
+      const { data } = await supabase.from('crm_users').select('id, real_name, role, avatar_url').neq('id', currentUserId).order('real_name');
       if (data) setAllUsers(data);
   };
 
@@ -235,11 +249,25 @@ export default function ChatBubble({ currentUserId, onClose, onRoomChange }: Cha
                     const isMentioned = msg.mentions && msg.mentions.includes(currentUserId);
                     return (
                         <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} animate-in slide-in-from-bottom-2 duration-300`}>
-                            <div className={`max-w-[85%] px-3 py-2 rounded-xl text-xs shadow-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : (isMentioned ? 'bg-yellow-500/20 border border-yellow-500 text-yellow-100' : 'bg-[#1e293b] text-gray-200 border border-white/5')} ${!isMe && !isMentioned ? 'rounded-bl-none' : 'rounded-xl'}`}>
-                                {!isMe && <span className="block text-[9px] text-blue-400 font-bold mb-0.5">{msg.sender?.real_name}</span>}
-                                {msg.content}
+                            <div className="flex items-end gap-2 max-w-[90%]">
+                                {/* UPDATED: AVATAR IN BUBBLE */}
+                                {!isMe && (
+                                    <div className="w-6 h-6 rounded-full overflow-hidden bg-gray-700 shrink-0 mb-1 border border-white/10">
+                                        {msg.sender?.avatar_url ? (
+                                            <img src={msg.sender.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
+                                        ) : (
+                                            <div className="w-full h-full flex items-center justify-center text-[9px] text-white font-bold">{msg.sender?.real_name?.substring(0,2).toUpperCase()}</div>
+                                        )}
+                                    </div>
+                                )}
+                                <div>
+                                    <div className={`px-3 py-2 rounded-xl text-xs shadow-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : (isMentioned ? 'bg-yellow-500/20 border border-yellow-500 text-yellow-100' : 'bg-[#1e293b] text-gray-200 border border-white/5')} ${!isMe && !isMentioned ? 'rounded-bl-none' : 'rounded-xl'}`}>
+                                        {!isMe && <span className="block text-[9px] text-blue-400 font-bold mb-0.5">{msg.sender?.real_name}</span>}
+                                        {msg.content}
+                                    </div>
+                                    <span className="text-[9px] text-gray-600 mt-1 px-1 block text-right">{new Date(msg.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                                </div>
                             </div>
-                            <span className="text-[9px] text-gray-600 mt-1 px-1">{new Date(msg.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
                         </div>
                     );
                 })}
@@ -289,14 +317,19 @@ export default function ChatBubble({ currentUserId, onClose, onRoomChange }: Cha
                                 const hasUnread = unreadSenders.has(chat.other_user_id);
                                 return (
                                     <div key={chat.room_id} onClick={() => handleChatClick(chat.room_id, chat.other_user_name, chat.other_user_id)} className={`p-2 rounded-lg flex items-center gap-3 cursor-pointer group transition ${hasUnread ? 'bg-blue-600/20 border border-blue-500/30' : 'hover:bg-white/5'}`}>
-                                        <div className="relative">
-                                            <div className="w-8 h-8 bg-gray-700 rounded-lg flex items-center justify-center text-[10px] text-white font-bold group-hover:bg-gray-600 transition">{chat.other_user_name.substring(0,2).toUpperCase()}</div>
-                                            {hasUnread && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-blue-500 rounded-full border border-black shadow-md animate-pulse"></span>}
-                                        </div>
-                                        <div className="flex-1">
-                                            <p className={`text-xs font-medium transition ${hasUnread ? 'text-white font-bold' : 'text-gray-300 group-hover:text-white'}`}>{chat.other_user_name}</p>
-                                            <p className="text-[9px] text-gray-600">{new Date(chat.last_msg_at).toLocaleDateString()}</p>
-                                        </div>
+                                            <div className="relative">
+                                                {/* UPDATED: AVATAR IN LIST */}
+                                                <div className="w-8 h-8 bg-gray-700 rounded-lg flex items-center justify-center text-[10px] text-white font-bold group-hover:bg-gray-600 transition overflow-hidden">
+                                                    {chat.avatar_url ? <img src={chat.avatar_url} className="w-full h-full object-cover"/> : chat.other_user_name.substring(0,2).toUpperCase()}
+                                                </div>
+                                                {hasUnread && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-blue-500 rounded-full border border-black shadow-md animate-pulse"></span>}
+                                            </div>
+                                            <div className="flex-1">
+                                                <div className="flex justify-between items-center">
+                                                    <p className={`text-xs font-medium transition ${hasUnread ? 'text-white font-bold' : 'text-gray-300 group-hover:text-white'}`}>{chat.other_user_name}</p>
+                                                    <span className="text-[9px] text-gray-600">{new Date(chat.last_msg_at).toLocaleDateString()}</span>
+                                                </div>
+                                            </div>
                                     </div>
                                 );
                             })}
@@ -314,7 +347,9 @@ export default function ChatBubble({ currentUserId, onClose, onRoomChange }: Cha
                         <div className="flex-1 overflow-y-auto space-y-1 custom-scrollbar">
                             {filteredUsers.map(u => (
                                 <div key={u.id} onClick={() => handleStartDM(u.id, u.real_name)} className="p-2 hover:bg-white/5 rounded-lg flex items-center gap-3 cursor-pointer">
-                                    <div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center text-[10px] text-white font-bold">{u.real_name.substring(0,2).toUpperCase()}</div>
+                                    <div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center text-[10px] text-white font-bold overflow-hidden">
+                                        {u.avatar_url ? <img src={u.avatar_url} className="w-full h-full object-cover"/> : u.real_name.substring(0,2).toUpperCase()}
+                                    </div>
                                     <div className="flex-1"><p className="text-gray-300 text-xs font-medium">{u.real_name}</p><p className="text-[9px] text-gray-500 capitalize">{u.role}</p></div>
                                 </div>
                             ))}
@@ -330,7 +365,9 @@ export default function ChatBubble({ currentUserId, onClose, onRoomChange }: Cha
                             <div className="absolute bottom-12 left-2 bg-crm-bg border border-white/20 rounded-xl shadow-2xl w-40 overflow-hidden z-50 animate-in slide-in-from-bottom-2">
                                 {filteredTags.map(u => (
                                     <div key={u.id} onClick={() => addTag(u)} className="px-3 py-2 hover:bg-blue-600 hover:text-white text-gray-300 text-xs cursor-pointer flex items-center gap-2">
-                                        <div className="w-4 h-4 bg-gray-700 rounded-full flex items-center justify-center font-bold text-[8px]">{u.real_name.substring(0,2).toUpperCase()}</div>
+                                        <div className="w-4 h-4 bg-gray-700 rounded-full flex items-center justify-center font-bold text-[8px] overflow-hidden">
+                                            {u.avatar_url ? <img src={u.avatar_url} className="w-full h-full object-cover"/> : u.real_name.substring(0,2).toUpperCase()}
+                                        </div>
                                         {u.real_name}
                                     </div>
                                 ))}

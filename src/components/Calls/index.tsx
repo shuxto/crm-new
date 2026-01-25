@@ -12,6 +12,7 @@ interface AgentStats {
   calls_today: number;
   calls_all_time: number;
   last_call_time: string | null;
+  avatar_url?: string; // <--- Added optional avatar field
 }
 
 export default function CallsPage() {
@@ -22,9 +23,27 @@ export default function CallsPage() {
 
   // --- 1. FETCH DATA ---
   const fetchStats = async () => {
-    const { data, error } = await supabase.rpc('get_call_stats');
-    if (!error && data) {
-      setStats(data);
+    // A. Fetch Stats from RPC
+    const { data: statsData, error } = await supabase.rpc('get_call_stats');
+    
+    if (!error && statsData) {
+      // B. Fetch Avatars for these users
+      const userIds = statsData.map((s: any) => s.user_id);
+      const { data: userData } = await supabase
+        .from('crm_users')
+        .select('id, avatar_url')
+        .in('id', userIds);
+
+      // C. Merge Data
+      const avatarMap = new Map();
+      userData?.forEach((u: any) => avatarMap.set(u.id, u.avatar_url));
+
+      const mergedStats = statsData.map((s: any) => ({
+        ...s,
+        avatar_url: avatarMap.get(s.user_id)
+      }));
+
+      setStats(mergedStats);
       setLastUpdate(new Date());
     }
     setLoading(false);
@@ -162,7 +181,6 @@ export default function CallsPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5">
-            {/* FIXED: Removed unused 'index' parameter */}
             {filteredStats.map((agent) => {
               // Calculate original index to keep ranking correct even when searching
               const originalIndex = stats.findIndex(a => a.user_id === agent.user_id);
@@ -200,10 +218,15 @@ export default function CallsPage() {
                   
                   <td className="p-4">
                     <div className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold 
+                        {/* UPDATED: AVATAR DISPLAY */}
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold overflow-hidden 
                             ${isRetention ? 'bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20' : 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'}
                         `}>
-                            {agent.real_name.substring(0, 2).toUpperCase()}
+                            {agent.avatar_url ? (
+                                <img src={agent.avatar_url} alt={agent.real_name} className="w-full h-full object-cover" />
+                            ) : (
+                                agent.real_name.substring(0, 2).toUpperCase()
+                            )}
                         </div>
                         <div>
                             <p className="text-white font-bold text-sm group-hover:text-cyan-400 transition-colors">

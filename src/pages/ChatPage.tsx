@@ -12,8 +12,13 @@ const SidebarItem = memo(({ user, isActive, onClick }: { user: any, isActive: bo
             onClick={() => onClick(user.id, user.real_name)}
             className={`p-2 rounded-lg flex items-center gap-3 cursor-pointer group transition-colors ${isActive ? 'bg-white/10' : 'hover:bg-white/5'}`}
         >
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white transition-colors ${isActive ? 'bg-blue-600' : 'bg-gray-700 group-hover:bg-blue-500'}`}>
-                {user.real_name.substring(0,2).toUpperCase()}
+            {/* UPDATED: AVATAR DISPLAY */}
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white transition-colors overflow-hidden ${isActive ? 'bg-blue-600' : 'bg-gray-700 group-hover:bg-blue-500'}`}>
+                {user.avatar_url ? (
+                    <img src={user.avatar_url} alt={user.real_name} className="w-full h-full object-cover" />
+                ) : (
+                    user.real_name.substring(0,2).toUpperCase()
+                )}
             </div>
             <div className="flex-1 min-w-0">
                 <p className={`text-sm font-medium truncate transition-colors ${isActive ? 'text-white' : 'text-gray-300 group-hover:text-white'}`}>
@@ -30,7 +35,6 @@ export default function ChatPage() {
   const [activeRoom, setActiveRoom] = useState<string>(GLOBAL_CHAT_ID); 
   const [activeRoomName, setActiveRoomName] = useState('Global Headquarters');
   
-  // --- NEW: Track switching state to hide old chat instantly ---
   const [isSwitching, setIsSwitching] = useState(false);
 
   // The hook is optimized, so we just consume the data
@@ -53,18 +57,16 @@ export default function ChatPage() {
 
   // --- SMART SCROLL LOGIC ---
   useLayoutEffect(() => {
-    if (isSwitching) return; // Don't scroll while switching
+    if (isSwitching) return; 
     const container = scrollContainerRef.current;
     if (!container) return;
 
     const currentLen = messages.length;
     const prevLen = prevMessagesLength.current;
 
-    // 1. Switched Room / Initial Load
     if (prevLen === 0 && currentLen > 0) {
         messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
     }
-    // 2. New Message (Small increment)
     else if (currentLen > prevLen && (currentLen - prevLen) < 5) {
         const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 200;
         const lastMsg = messages[messages.length - 1];
@@ -96,7 +98,8 @@ export default function ChatPage() {
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setCurrentUser(data.user));
-    supabase.from('crm_users').select('id, real_name, role').order('real_name')
+    // UPDATED: Added avatar_url to fetch
+    supabase.from('crm_users').select('id, real_name, role, avatar_url').order('real_name')
       .then(({ data }) => { if(data) setUsers(data); });
 
     const params = new URLSearchParams(window.location.search);
@@ -148,17 +151,13 @@ export default function ChatPage() {
 
   // --- OPTIMIZED SWITCHING LOGIC ---
   const startDM = useCallback(async (otherUserId: string, otherUserName: string) => {
-    // 1. INSTANT FEEDBACK: Update name and show loader immediately
-    // This stops the "frozen old chat" feeling
     setIsSwitching(true);
     setActiveRoomName(otherUserName);
 
     try {
-        // 2. Network call happens in background while loader is shown
         const { data, error } = await supabase.rpc('create_or_get_dm_room', { other_user_id: otherUserId });
         if(error) throw error;
         
-        // 3. Update room ID and hide loader
         setActiveRoom(data);
     } catch (err) {
         console.error("DM Error:", err);
@@ -171,7 +170,6 @@ export default function ChatPage() {
       setIsSwitching(true);
       setActiveRoomName('Global Headquarters');
       setActiveRoom(GLOBAL_CHAT_ID);
-      // Small timeout to allow render cycle to clear old messages visually
       setTimeout(() => setIsSwitching(false), 50);
   }, []);
 
@@ -218,7 +216,6 @@ export default function ChatPage() {
 
   // --- MEMOIZED MESSAGE LIST ---
   const messagesList = useMemo(() => {
-    // Show Loading Skeleton if we are switching rooms or initial loading
     if (isSwitching || (loading && messages.length === 0)) {
         return (
             <div className="flex-1 p-6 space-y-4 overflow-hidden">
@@ -227,8 +224,8 @@ export default function ChatPage() {
                     <div className="h-10 w-48 bg-white/5 rounded-xl"></div>
                 </div>
                 <div className="flex items-start gap-3 flex-row-reverse animate-pulse">
-                     <div className="w-8 h-8 bg-white/5 rounded-lg"></div>
-                     <div className="h-12 w-64 bg-white/5 rounded-xl"></div>
+                      <div className="w-8 h-8 bg-white/5 rounded-lg"></div>
+                      <div className="h-12 w-64 bg-white/5 rounded-xl"></div>
                 </div>
                  <div className="flex items-start gap-3 animate-pulse">
                     <div className="w-8 h-8 bg-white/5 rounded-lg"></div>
@@ -263,8 +260,13 @@ export default function ChatPage() {
                 return (
                     <div key={msg.id} className={`flex flex-col group ${isMe ? 'items-end' : 'items-start'}`}>
                         <div className={`flex gap-3 max-w-[70%] ${isMe ? 'flex-row-reverse' : ''}`}>
-                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-xs font-bold ${isMe ? 'bg-indigo-500 text-white' : 'bg-gray-700 text-gray-300'} ${!showAvatar ? 'opacity-0' : ''}`}>
-                                {msg.sender?.real_name?.substring(0,2).toUpperCase()}
+                            {/* UPDATED: AVATAR LOGIC */}
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-xs font-bold overflow-hidden ${isMe ? 'bg-indigo-500 text-white' : 'bg-gray-700 text-gray-300'} ${!showAvatar ? 'opacity-0' : ''}`}>
+                                {msg.sender?.avatar_url ? (
+                                    <img src={msg.sender.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
+                                ) : (
+                                    msg.sender?.real_name?.substring(0,2).toUpperCase()
+                                )}
                             </div>
                             <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                                 {showAvatar && !isMe && <span className="text-[10px] text-gray-400 ml-1 mb-1">{msg.sender?.real_name}</span>}
@@ -351,7 +353,10 @@ export default function ChatPage() {
                         <div className="px-3 py-2 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-white/10">Suggestions</div>
                         {filteredTags.map(u => (
                             <div key={u.id} onClick={() => addTag(u)} className="px-3 py-2.5 hover:bg-blue-600 hover:text-white text-gray-300 text-xs cursor-pointer flex items-center gap-3 transition-colors border-b border-white/5 last:border-0">
-                                <div className="w-6 h-6 bg-gray-700 rounded-full flex items-center justify-center font-bold text-[10px] text-white border border-white/10">{u.real_name.substring(0,2).toUpperCase()}</div>
+                                {/* UPDATED: AVATAR IN MENTION LIST */}
+                                <div className="w-6 h-6 bg-gray-700 rounded-full flex items-center justify-center font-bold text-[10px] text-white border border-white/10 overflow-hidden">
+                                     {u.avatar_url ? <img src={u.avatar_url} className="w-full h-full object-cover"/> : u.real_name.substring(0,2).toUpperCase()}
+                                </div>
                                 <span className="font-medium">{u.real_name}</span>
                             </div>
                         ))}

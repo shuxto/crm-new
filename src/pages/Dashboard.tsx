@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import type { Session } from '@supabase/supabase-js'; 
-import type { Lead } from '../hooks/useLeads'; // <--- NEW IMPORT
+import type { Lead } from '../hooks/useLeads'; 
 import StatsGrid from '../components/StatsGrid';
 import AdvancedFilter from '../components/AdvancedFilter';
 import LeadsTable from '../components/LeadsTable';
 
 interface DashboardProps {
   session: Session;
-  onLeadClick: (lead: Lead) => void; // <--- FIXED: No more 'any'
+  onLeadClick: (lead: Lead) => void;
 }
 
 export default function Dashboard({ session, onLeadClick }: DashboardProps) {
@@ -54,17 +54,23 @@ export default function Dashboard({ session, onLeadClick }: DashboardProps) {
         role={currentRole}
       />
       
+      {/* UPDATED COMPONENT:
+          Passed role and userId clearly.
+          Removed any duplicate props.
+      */}
       <AdvancedFilter 
         currentFilters={activeFilters} 
         onFilterChange={setActiveFilters} 
         currentUserEmail={session.user.email}
+        role={currentRole}
+        userId={currentUserId}
       />
       
       <LeadsTable 
           role={currentRole} 
           filters={activeFilters} 
           onLeadClick={onLeadClick} 
-          currentUserEmail={currentUserId} 
+          currentUserEmail={session.user.email} 
           onPageChange={(newPage: number) => setActiveFilters(prev => ({ ...prev, page: newPage }))}
       />
     </div>

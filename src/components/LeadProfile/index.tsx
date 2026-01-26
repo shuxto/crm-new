@@ -107,19 +107,24 @@ export default function LeadProfilePage({ lead, onBack }: LeadProfilePageProps) 
     };
   }, [dbTrades, activeTab]);
 
-  // --- 3. CALCULATE LIVE PnL & EQUITY ---
-  // This runs every time 'livePrices' updates
+  // --- 3. CALCULATE LIVE PnL & EQUITY (FIXED) ---
   const activeTradesWithLiveStats = dbTrades.map(trade => {
-      const currentPrice = livePrices[trade.symbol] || trade.entry_price; // Fallback to entry if no live data yet
+      const currentPrice = livePrices[trade.symbol] || trade.entry_price; 
       
       let pnl = 0;
+      
+      // 🛠️ FIX: Use Percentage Change Formula because 'size' is in USD
+      // Formula: ((Current - Entry) / Entry) * Size
       if (trade.type === 'buy') {
-          pnl = (currentPrice - trade.entry_price) * trade.size;
+          pnl = ((currentPrice - trade.entry_price) / trade.entry_price) * trade.size;
       } else {
-          pnl = (trade.entry_price - currentPrice) * trade.size;
+          pnl = ((trade.entry_price - currentPrice) / trade.entry_price) * trade.size;
       }
 
-      const margin = (trade.entry_price * trade.size) / trade.leverage;
+      // Margin is purely for ROE calculation
+      const margin = trade.margin || (trade.size / trade.leverage);
+      
+      // Calculate ROE
       const roe = margin > 0 ? ((pnl / margin) * 100).toFixed(2) : "0.00";
 
       return { ...trade, currentPrice, pnl, roe, margin };

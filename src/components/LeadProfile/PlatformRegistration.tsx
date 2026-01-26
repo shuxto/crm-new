@@ -7,18 +7,16 @@ import { supabase } from '../../lib/supabase';
 const DB_URL = import.meta.env.VITE_SUPABASE_URL;
 const DB_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Safety Check
 if (!DB_URL || !DB_KEY) {
   console.error("CRITICAL ERROR: Keys are missing from .env");
 }
 
-// ⚡ CLEAN CLIENT: Uses unique storageKey to isolate registration session
 const registrationClient = createClient(DB_URL || '', DB_KEY || '', {
   auth: {
     persistSession: false, 
     autoRefreshToken: false,
     detectSessionInUrl: false,
-    storageKey: 'crm-platform-registration-client' // Unique key prevents conflict
+    storageKey: 'crm-platform-registration-client'
   }
 });
 
@@ -30,7 +28,6 @@ export default function PlatformRegistration({ lead }: Props) {
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   
-  // Checks if user is already registered (from DB or local state)
   const [isRegistered, setIsRegistered] = useState(!!lead.trading_account_id);
 
   const [formData, setFormData] = useState({
@@ -38,7 +35,6 @@ export default function PlatformRegistration({ lead }: Props) {
     password: '',
   });
 
-  // Auto-hide popup
   useEffect(() => {
     if (successMsg) {
         const timer = setTimeout(() => setSuccessMsg(null), 4000);
@@ -58,13 +54,18 @@ export default function PlatformRegistration({ lead }: Props) {
   const handleRegister = async () => {
     if (!formData.login || !formData.password) {
         setSuccessMsg("Error: Please fill in login and password"); 
-        alert("Please fill in both Login and Password fields.");
         return;
     }
 
     setLoading(true);
 
     try {
+        // 🛠️ FIX: Combine Name + Last Name
+        // We check for 'last_name' or 'surname' just in case your DB names it differently
+        const firstName = lead.name || '';
+        const lastName = lead.last_name || lead.surname || ''; 
+        const fullName = `${firstName} ${lastName}`.trim();
+
         // 1. Create User in Auth System
         const { data, error } = await registrationClient.auth.signUp({
             email: formData.login,
@@ -74,7 +75,7 @@ export default function PlatformRegistration({ lead }: Props) {
                     role: 'user',        
                     balance: 10000,      
                     source: 'crm',
-                    full_name: lead.name || '' 
+                    full_name: fullName // <--- NOW SENDING THE FULL NAME
                 }
             }
         });
@@ -82,13 +83,12 @@ export default function PlatformRegistration({ lead }: Props) {
         if (error) throw error;
         if (!data.user?.id) throw new Error("No User ID returned");
 
-        // 2. IMPORTANT: Save the new Trading ID to the CRM Lead
+        // 2. Save the new Trading ID to the CRM Lead
         await supabase
             .from('crm_leads')
             .update({ trading_account_id: data.user.id })
             .eq('id', lead.id);
 
-        // 3. Update UI State
         setIsRegistered(true);
         setSuccessMsg(`Trading Account Created Successfully! ID: ${data.user.id.slice(0, 8)}...`);
 
@@ -103,11 +103,10 @@ export default function PlatformRegistration({ lead }: Props) {
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300 relative">
       
-      {/* --- AMAZING SUCCESS POPUP --- */}
+      {/* SUCCESS POPUP */}
       {successMsg && (
         <div className="fixed top-10 right-10 z-50 animate-in slide-in-from-top-10 fade-in duration-300">
             <div className="bg-crm-bg border border-green-500/30 rounded-2xl shadow-2xl shadow-green-500/20 p-5 flex items-center gap-4 min-w-75 relative overflow-hidden">
-                {/* Fixed: bg-linear-to-b */}
                 <div className="absolute top-0 left-0 w-1 h-full bg-linear-to-b from-green-400 to-emerald-600"></div>
                 <div className="p-3 bg-green-500/10 rounded-full text-green-400">
                     <CheckCircle size={24} />
@@ -140,10 +139,7 @@ export default function PlatformRegistration({ lead }: Props) {
           
           {/* LEFT COLUMN */}
           <div className="col-span-12 lg:col-span-7">
-              
-              {/* CONDITION: IF REGISTERED -> SHOW LOCKED CARD */}
               {isRegistered ? (
-                  // Fixed: min-h-75
                   <div className="p-8 rounded-2xl border border-green-500/20 bg-green-500/5 text-center flex flex-col items-center justify-center h-full min-h-75">
                       <div className="p-4 rounded-full bg-green-500/10 text-green-400 mb-4 shadow-[0_0_20px_rgba(74,222,128,0.2)]">
                           <CheckCircle size={48} />
@@ -158,7 +154,6 @@ export default function PlatformRegistration({ lead }: Props) {
                       </div>
                   </div>
               ) : (
-                  // ELSE -> SHOW REGISTRATION FORM
                   <div className="p-6 rounded-2xl border border-white/10 bg-white/5 space-y-6">
                      <h3 className="text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2">
                         <Plus size={16} className="text-blue-400"/> Create New Account
@@ -206,7 +201,6 @@ export default function PlatformRegistration({ lead }: Props) {
                      <button 
                         onClick={handleRegister}
                         disabled={loading || !formData.password || !formData.login}
-                        // Fixed: bg-linear-to-r
                         className="cursor-pointer w-full bg-linear-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition text-sm shadow-lg shadow-blue-500/20 mt-4 flex items-center justify-center gap-2"
                      >
                         {loading ? <Loader2 className="animate-spin" size={16} /> : null}

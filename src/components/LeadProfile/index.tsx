@@ -1,3 +1,4 @@
+import { io } from 'socket.io-client';
 import { useState, useEffect } from 'react';
 import { LayoutDashboard, FileText, PenTool, History, Trash2, Server, ArrowRightLeft, TrendingUp, Edit2, AlertTriangle, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase'; 
@@ -9,8 +10,8 @@ import LeadTransactions from './LeadTransactions';
 import LeadTradeHistory from './LeadTradeHistory';
 import LeadFinancials from './LeadFinancials';
 
-// ⚠️ YOUR API KEY from marketSocket.ts
-const TWELVE_DATA_KEY = "05e7f5f30b384f11936a130f387c4092"; 
+// ⚠️ API KEY from twelwedata.ts
+const MARKET_SOCKET_URL = "wss://trading-production-169d.up.railway.app";
 
 interface LeadProfilePageProps {
   lead: any;
@@ -93,36 +94,36 @@ export default function LeadProfilePage({ lead, onBack }: LeadProfilePageProps) 
     setLoadingData(false);
   };
 
-  // --- 2. WEBSOCKET CONNECTION ---
+  // --- 2. SOCKET.IO CONNECTION (FINAL WORKING VERSION) ---
   useEffect(() => {
     if (dbTrades.length === 0 || activeTab !== 'overview') return;
 
+    // 1. Prepare symbols string
     const symbols = Array.from(new Set(dbTrades.map(t => t.symbol))).join(',');
-    const ws = new WebSocket(`wss://ws.twelvedata.com/v1/quotes/price?apikey=${TWELVE_DATA_KEY}`);
 
-    ws.onopen = () => {
-        ws.send(JSON.stringify({ action: "subscribe", params: { symbols } }));
-    };
+    // 2. Connect to Railway
+    const socket = io(MARKET_SOCKET_URL, {
+        transports: ['websocket', 'polling'],
+    });
 
-    ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.event === 'price' && data.symbol && data.price) {
+    socket.on('connect', () => {
+        // 3. Send Subscribe Message
+        socket.emit('subscribe', { action: "subscribe", params: { symbols } });
+    });
+
+    // ✅ FIX: Listen for 'price_update' (detected by Spy)
+    socket.on('price_update', (data: any) => {
+        if (data && data.symbol && data.price) {
             setLivePrices(prev => ({
                 ...prev,
                 [data.symbol]: parseFloat(data.price)
             }));
         }
-    };
+    });
 
-    const heartbeat = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ action: "heartbeat" }));
-        }
-    }, 10000);
-
+    // Cleanup
     return () => {
-        clearInterval(heartbeat);
-        ws.close();
+        socket.disconnect();
     };
   }, [dbTrades, activeTab]);
 

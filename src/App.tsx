@@ -25,13 +25,27 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   
-  const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  // --- MODIFIED: Load 'selectedLead' from storage, or default to null ---
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(() => {
+    const saved = localStorage.getItem('crm_selected_lead');
+    return saved ? JSON.parse(saved) : null;
+  });
+
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   
   const [showBubble, setShowBubble] = useState(false);
   // --- NEW: This fixes the Red Dot issue ---
   // It tracks which room you are currently looking at.
   const [activeBubbleRoom, setActiveBubbleRoom] = useState<string | null>(null); 
+
+  // --- NEW: Auto-save Selected Lead when it changes ---
+  useEffect(() => {
+    if (selectedLead) {
+      localStorage.setItem('crm_selected_lead', JSON.stringify(selectedLead));
+    } else {
+      localStorage.removeItem('crm_selected_lead');
+    }
+  }, [selectedLead]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {

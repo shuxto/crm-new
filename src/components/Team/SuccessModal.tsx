@@ -2,13 +2,14 @@ import { CheckCircle2, AlertOctagon } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;
-  type: 'success' | 'error';
+  type?: 'success' | 'error'; // Changed: Added '?' to make it optional
   title: string;
   message: string;
   onClose: () => void;
 }
 
-export default function SuccessModal({ isOpen, type, title, message, onClose }: Props) {
+// Changed: Added default value "type = 'success'"
+export default function SuccessModal({ isOpen, type = 'success', title, message, onClose }: Props) {
   if (!isOpen) return null;
 
   const isSuccess = type === 'success';

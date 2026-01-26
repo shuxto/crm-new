@@ -6,6 +6,31 @@ interface ProfileHeaderProps {
 }
 
 export default function ProfileHeader({ lead, onBack }: ProfileHeaderProps) {
+  
+  // 1. ROBUST NAME LOGIC: Tries to find the best full name
+  const getFullName = () => {
+    // Priority 1: "real_name" column
+    if (lead.real_name) return lead.real_name;
+    
+    // Priority 2: "full_name" column
+    if (lead.full_name) return lead.full_name;
+
+    // Priority 3: Combine "first_name" + "last_name"
+    if (lead.first_name || lead.last_name) {
+      return `${lead.first_name || ''} ${lead.last_name || ''}`.trim();
+    }
+    
+    // Priority 4: Combine "name" + "surname" (if your DB uses 'surname')
+    if (lead.surname) {
+      return `${lead.name || ''} ${lead.surname}`.trim();
+    }
+
+    // Fallback: Just the Name
+    return lead.name || 'Unknown Lead';
+  };
+
+  const displayName = getFullName();
+
   return (
     <div className="glass-panel p-6 rounded-xl border border-white/5 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
       <div className="flex items-center gap-6">
@@ -24,12 +49,25 @@ export default function ProfileHeader({ lead, onBack }: ProfileHeaderProps) {
           </div>
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-bold text-white tracking-tight">{lead.name}</h1>
+              {/* DISPLAY FULL NAME */}
+              <h1 className="text-3xl font-bold text-white tracking-tight">{displayName}</h1>
+              
+              {/* STATUS BADGE */}
               <span className="px-3 py-1 rounded-lg bg-green-500/10 text-green-400 border border-green-500/20 text-[10px] font-bold uppercase tracking-widest">
                 {lead.status}
               </span>
             </div>
-            <p className="text-gray-500 text-xs font-mono mt-1">UUID: {lead.id} • Created: {lead.created_at}</p>
+            
+            {/* SUBTITLE: Shows UUID and Original Username if different */}
+            <p className="text-gray-500 text-xs font-mono mt-1 flex items-center gap-2">
+               <span>UUID: {lead.id}</span>
+               {/* If the display name is different from the simple 'name', show 'name' as username */}
+               {displayName !== lead.name && (
+                 <span className="text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20">
+                   @{lead.name}
+                 </span>
+               )}
+            </p>
           </div>
         </div>
       </div>

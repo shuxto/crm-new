@@ -1,6 +1,6 @@
 import { io } from 'socket.io-client';
 import { useState, useEffect } from 'react';
-import { LayoutDashboard, FileText, PenTool, History, Trash2, Server, ArrowRightLeft, TrendingUp, Edit2, AlertTriangle, X } from 'lucide-react';
+import { LayoutDashboard, FileText, PenTool, History, Trash2, Server, ArrowRightLeft, TrendingUp, Edit2, AlertTriangle, X, Briefcase } from 'lucide-react'; // <--- ADDED Briefcase
 import { supabase } from '../../lib/supabase'; 
 import ProfileHeader from './ProfileHeader';
 import KYCSummary from './KYCSummary';
@@ -9,6 +9,7 @@ import PlatformRegistration from './PlatformRegistration';
 import LeadTransactions from './LeadTransactions';
 import LeadTradeHistory from './LeadTradeHistory';
 import LeadFinancials from './LeadFinancials';
+import TradingAccountsTab from './TradingAccountsTab'; // <--- NEW IMPORT
 
 // ⚠️ API KEY from twelwedata.ts
 const MARKET_SOCKET_URL = "wss://trading-production-169d.up.railway.app";
@@ -19,7 +20,8 @@ interface LeadProfilePageProps {
 }
 
 export default function LeadProfilePage({ lead, onBack }: LeadProfilePageProps) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'resume' | 'update' | 'platform' | 'transactions' | 'history'>(() => {
+  // <--- UPDATED TAB STATE
+  const [activeTab, setActiveTab] = useState<'overview' | 'resume' | 'update' | 'platform' | 'transactions' | 'history' | 'accounts'>(() => {
     const saved = localStorage.getItem('crm_profile_active_tab');
     return (saved as any) || 'overview';
   });
@@ -202,7 +204,6 @@ export default function LeadProfilePage({ lead, onBack }: LeadProfilePageProps) 
 
   if (!lead) return null;
 
-  // ✅ FIXED: Changed max-w-[1600px] to max-w-400
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-300 p-6 max-w-400 mx-auto w-full relative">
       <ProfileHeader lead={lead} onBack={onBack} />
@@ -210,11 +211,15 @@ export default function LeadProfilePage({ lead, onBack }: LeadProfilePageProps) 
       {/* TABS */}
       <div className="flex items-center gap-2 mb-6 border-b border-white/10 pb-1 overflow-x-auto">
         <TabButton active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} icon={<LayoutDashboard size={16}/>} label="Overview" />
+        
+        {/* NEW ACCOUNTS TAB BUTTON */}
+        <TabButton active={activeTab === 'accounts'} onClick={() => setActiveTab('accounts')} icon={<Briefcase size={16}/>} label="Trading Accounts" />
+        
         <TabButton active={activeTab === 'transactions'} onClick={() => setActiveTab('transactions')} icon={<ArrowRightLeft size={16}/>} label="Transactions" />
-        <TabButton active={activeTab === 'history'} onClick={() => setActiveTab('history')} icon={<History size={16}/>} label="History" />
-        <TabButton active={activeTab === 'resume'} onClick={() => setActiveTab('resume')} icon={<FileText size={16}/>} label="KYC" />
-        <TabButton active={activeTab === 'update'} onClick={() => setActiveTab('update')} icon={<PenTool size={16}/>} label="Update" />
-        <TabButton active={activeTab === 'platform'} onClick={() => setActiveTab('platform')} icon={<Server size={16}/>} label="Platform" />
+        <TabButton active={activeTab === 'history'} onClick={() => setActiveTab('history')} icon={<History size={16}/>} label="Trade History" />
+        <TabButton active={activeTab === 'resume'} onClick={() => setActiveTab('resume')} icon={<FileText size={16}/>} label="KYC Summary" />
+        <TabButton active={activeTab === 'update'} onClick={() => setActiveTab('update')} icon={<PenTool size={16}/>} label="Update KYC" />
+        <TabButton active={activeTab === 'platform'} onClick={() => setActiveTab('platform')} icon={<Server size={16}/>} label="Platform Account" />
       </div>
 
       {activeTab === 'overview' && (
@@ -281,7 +286,6 @@ export default function LeadProfilePage({ lead, onBack }: LeadProfilePageProps) 
                                            </td>
                                            <td className="py-3 text-center text-gray-300">{Number(t.size).toLocaleString()}</td>
                                            
-                                           {/* ✅ FIXED: Button is now bigger, un-scaled, and positioned right-2 */}
                                            <td className="py-3 text-right text-gray-300 relative group-hover:text-blue-200 transition-colors">
                                                {Number(t.entry_price).toLocaleString()}
                                                <button 
@@ -427,6 +431,9 @@ export default function LeadProfilePage({ lead, onBack }: LeadProfilePageProps) 
             </div>
         </div>
       )}
+
+      {/* NEW ACCOUNTS TAB */}
+      {activeTab === 'accounts' && <TradingAccountsTab lead={lead} />}
 
       {/* OTHER TABS */}
       {activeTab === 'transactions' && <LeadTransactions lead={lead} />}

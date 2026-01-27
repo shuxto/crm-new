@@ -1,35 +1,31 @@
-import { ArrowLeft, User, Phone, Mail, Globe, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, User, Phone, Mail, Globe, ShieldCheck, ShieldAlert } from 'lucide-react'; //
 
 interface ProfileHeaderProps {
-  lead: any;
-  onBack: () => void;
+  lead: any; //
+  onBack: () => void; //
 }
 
 export default function ProfileHeader({ lead, onBack }: ProfileHeaderProps) {
   
-  // 1. ROBUST NAME LOGIC: Tries to find the best full name
+  // 1. ROBUST NAME LOGIC
   const getFullName = () => {
-    // Priority 1: "real_name" column
     if (lead.real_name) return lead.real_name;
-    
-    // Priority 2: "full_name" column
     if (lead.full_name) return lead.full_name;
-
-    // Priority 3: Combine "first_name" + "last_name"
     if (lead.first_name || lead.last_name) {
       return `${lead.first_name || ''} ${lead.last_name || ''}`.trim();
     }
-    
-    // Priority 4: Combine "name" + "surname" (if your DB uses 'surname')
     if (lead.surname) {
       return `${lead.name || ''} ${lead.surname}`.trim();
     }
-
-    // Fallback: Just the Name
     return lead.name || 'Unknown Lead';
   };
 
   const displayName = getFullName();
+
+  // 2. DYNAMIC KYC STATUS CHECK
+  // Checks if status is 'Verified' or 'Approved' (Case insensitive)
+  const rawStatus = lead.kyc_status || 'Pending';
+  const isVerified = ['verified', 'approved'].includes(rawStatus.toLowerCase());
 
   return (
     <div className="glass-panel p-6 rounded-xl border border-white/5 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
@@ -37,7 +33,7 @@ export default function ProfileHeader({ lead, onBack }: ProfileHeaderProps) {
         {/* BACK BUTTON */}
         <button 
           onClick={onBack}
-          className="p-3 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 text-gray-400 hover:text-white transition-all group"
+          className="p-3 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 text-gray-400 hover:text-white transition-all group cursor-pointer"
         >
           <ArrowLeft size={20} className="group-hover:-translate-x-1 transition-transform" />
         </button>
@@ -53,15 +49,18 @@ export default function ProfileHeader({ lead, onBack }: ProfileHeaderProps) {
               <h1 className="text-3xl font-bold text-white tracking-tight">{displayName}</h1>
               
               {/* STATUS BADGE */}
-              <span className="px-3 py-1 rounded-lg bg-green-500/10 text-green-400 border border-green-500/20 text-[10px] font-bold uppercase tracking-widest">
-                {lead.status}
+              <span className={`px-3 py-1 rounded-lg border text-[10px] font-bold uppercase tracking-widest ${
+                lead.status === 'active' 
+                  ? 'bg-green-500/10 text-green-400 border-green-500/20' 
+                  : 'bg-gray-500/10 text-gray-400 border-gray-500/20'
+              }`}>
+                {lead.status || 'New'}
               </span>
             </div>
             
-            {/* SUBTITLE: Shows UUID and Original Username if different */}
+            {/* SUBTITLE */}
             <p className="text-gray-500 text-xs font-mono mt-1 flex items-center gap-2">
                <span>UUID: {lead.id}</span>
-               {/* If the display name is different from the simple 'name', show 'name' as username */}
                {displayName !== lead.name && (
                  <span className="text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20">
                    @{lead.name}
@@ -88,8 +87,11 @@ export default function ProfileHeader({ lead, onBack }: ProfileHeaderProps) {
           <div className="flex items-center gap-2 text-gray-300">
             <Globe size={14} className="text-blue-500" /> {lead.country}
           </div>
-          <div className="flex items-center gap-2 text-yellow-500">
-            <ShieldCheck size={14} /> KYC Pending
+          
+          {/* ✅ FIXED: DYNAMIC KYC STATUS */}
+          <div className={`flex items-center gap-2 font-bold ${isVerified ? 'text-green-400' : 'text-yellow-500'}`}>
+            {isVerified ? <ShieldCheck size={14} /> : <ShieldAlert size={14} />}
+            {isVerified ? 'KYC Verified' : 'KYC Pending'}
           </div>
         </div>
       </div>

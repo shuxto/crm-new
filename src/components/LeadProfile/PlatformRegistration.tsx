@@ -67,18 +67,19 @@ export default function PlatformRegistration({ lead }: Props) {
         const fullName = `${firstName} ${lastName}`.trim();
 
         // 1. Create User in Auth System
-        const { data, error } = await registrationClient.auth.signUp({
-            email: formData.login,
-            password: formData.password,
-            options: {
-                data: {
-                    role: 'user',        
-                    balance: 10000,      
-                    source: 'crm',
-                    full_name: fullName // <--- NOW SENDING THE FULL NAME
-                }
-            }
-        });
+const { data, error } = await registrationClient.auth.signUp({
+    email: formData.login,
+    password: formData.password,
+    options: {
+        data: {
+            role: 'user',        
+            balance: 0,      
+            source: 'crm',
+            full_name: fullName,
+            kyc_status: 'unverified' 
+        }
+    }
+});
 
         if (error) throw error;
         if (!data.user?.id) throw new Error("No User ID returned");

@@ -2,6 +2,14 @@ import { User, MapPin, Save, UploadCloud, Landmark, Plus, Trash2, FileText, Cred
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 
+// Standard Country List
+const COUNTRIES = [
+  "United States", "United Kingdom", "Canada", "Australia", "Germany", "France", "Italy", "Spain", "Netherlands", "Switzerland",
+  "Sweden", "Norway", "Denmark", "Finland", "Belgium", "Austria", "Ireland", "Poland", "Portugal", "Greece",
+  "Japan", "South Korea", "Singapore", "Hong Kong", "New Zealand", "United Arab Emirates", "Saudi Arabia", "Qatar", "Israel", "Turkey",
+  "Brazil", "Mexico", "Argentina", "Chile", "Colombia", "Peru", "South Africa", "India", "China", "Malaysia", "Thailand", "Indonesia", "Vietnam"
+].sort();
+
 interface Props {
   lead: any;
 }
@@ -37,8 +45,10 @@ export default function KYCForm({ lead }: Props) {
     }
   }, [successMsg]);
 
-  // --- FETCH EXISTING DATA ---
+  // --- FETCH EXISTING DATA & LISTEN FOR UPDATES ---
   useEffect(() => {
+    let channel: any;
+
     const fetchKYC = async () => {
         if (!lead?.id) return;
         setLoading(true);
@@ -66,14 +76,39 @@ export default function KYCForm({ lead }: Props) {
                 source: data.source_of_funds || '',
                 additionalInfo: data.additional_info || '',
                 banks: data.bank_details && Array.isArray(data.bank_details) && data.bank_details.length > 0 
-                       ? data.bank_details 
-                       : [{ id: Date.now(), name: '' }]
+                        ? data.bank_details 
+                        : [{ id: Date.now(), name: '' }]
             });
         }
         setLoading(false);
     };
 
     fetchKYC();
+
+    // --- REALTIME LISTENER FOR CRM AGENT ---
+    // If the User updates their KYC from the Trading App, the Agent sees it instantly.
+    if (lead?.id) {
+        channel = supabase
+            .channel(`crm-kyc-${lead.id}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*', // Listen for INSERT or UPDATE
+                    schema: 'public',
+                    table: 'crm_kyc',
+                    filter: `lead_id=eq.${lead.id}`,
+                },
+                () => {
+                    // Refresh data when change happens
+                    fetchKYC();
+                }
+            )
+            .subscribe();
+    }
+
+    return () => {
+        if (channel) supabase.removeChannel(channel);
+    }
   }, [lead.id]);
 
 
@@ -113,7 +148,15 @@ export default function KYCForm({ lead }: Props) {
     if (error) {
         alert('Error saving data: ' + error.message);
     } else {
+        // 1. Update CRM Lead Status
         await supabase.from('crm_leads').update({ kyc_status: 'Pending' }).eq('id', lead.id);
+
+        // 2. --- THE REALTIME FIX --- 
+        // We MUST update the 'profiles' table too. This triggers the listener on the Client Side!
+        if (lead.trading_account_id) {
+             await supabase.from('profiles').update({ kyc_status: 'pending' }).eq('id', lead.trading_account_id);
+        }
+
         // REPLACED ALERT WITH SUCCESS STATE
         setSuccessMsg('Personal Information Saved Successfully!'); 
     }
@@ -168,7 +211,7 @@ export default function KYCForm({ lead }: Props) {
       {successMsg && (
         <div className="fixed top-10 right-10 z-50 animate-in slide-in-from-top-10 fade-in duration-300">
             {/* FIXED CLASSES HERE */}
-            <div className="bg-crm-bg border border-green-500/30 rounded-2xl shadow-2xl shadow-green-500/20 p-5 flex items-center gap-4 min-w-75 relative overflow-hidden">
+            <div className="bg-[#1e232d] border border-green-500/30 rounded-2xl shadow-2xl shadow-green-500/20 p-5 flex items-center gap-4 min-w-75 relative overflow-hidden">
                 {/* Glow Effect: FIXED bg-linear-to-b */}
                 <div className="absolute top-0 left-0 w-1 h-full bg-linear-to-b from-green-400 to-emerald-600"></div>
                 
@@ -210,6 +253,8 @@ export default function KYCForm({ lead }: Props) {
                  <div className="grid grid-cols-2 gap-4">
                     <Input label="First Name" val={formData.firstName} set={(v: string) => setFormData({...formData, firstName: v})} />
                     <Input label="Last Name" val={formData.lastName} set={(v: string) => setFormData({...formData, lastName: v})} />
+                    
+                    {/* NEW: Date Picker */}
                     <Input label="Date of Birth" type="date" val={formData.dob} set={(v: string) => setFormData({...formData, dob: v})} />
                     <Input label="Nationality" val={formData.nationality} set={(v: string) => setFormData({...formData, nationality: v})} />
                     
@@ -225,7 +270,19 @@ export default function KYCForm({ lead }: Props) {
                  <div className="grid grid-cols-2 gap-4">
                     <div className="col-span-2"><Input label="Street Address" val={formData.street} set={(v: string) => setFormData({...formData, street: v})} /></div>
                     <Input label="City" val={formData.city} set={(v: string) => setFormData({...formData, city: v})} />
-                    <Input label="Country" val={formData.country} set={(v: string) => setFormData({...formData, country: v})} />
+                    
+                    {/* NEW: Country Selector */}
+                    <div>
+                        <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Country of Residence</label>
+                        <select 
+                            value={formData.country}
+                            onChange={(e) => setFormData({...formData, country: e.target.value})}
+                            className="w-full bg-black/20 border border-white/10 rounded-lg p-2 text-sm text-white outline-none focus:border-cyan-500"
+                        >
+                            <option value="">-- Select Country --</option>
+                            {COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                    </div>
                  </div>
               </div>
 
@@ -384,6 +441,7 @@ function Input({ label, type="text", placeholder, val, set }: InputProps) {
             <input 
               type={type} placeholder={placeholder} value={val} onChange={(e) => set(e.target.value)} 
               className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-cyan-500 transition placeholder:text-gray-600" 
+              style={{ colorScheme: 'dark' }} // Forces date picker to be dark mode
             />
         </div>
     );

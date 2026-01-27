@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Server, Key, Plus, Shield, User, Loader2, CheckCircle, X, Lock } from 'lucide-react';
+import { Server, Key, Plus, Shield, User, Loader2, CheckCircle, X, Lock, RefreshCw } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/supabase'; 
 
 // ✅ USE YOUR EXISTING KEYS
 const DB_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -22,12 +22,17 @@ const registrationClient = createClient(DB_URL || '', DB_KEY || '', {
 
 interface Props {
   lead: any;
+  onSuccess?: () => void; 
 }
 
-export default function PlatformRegistration({ lead }: Props) {
+export default function PlatformRegistration({ lead, onSuccess }: Props) {
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   
+  // --- PASSWORD UPDATE STATE ---
+  const [newPassword, setNewPassword] = useState('');
+  const [updatingPass, setUpdatingPass] = useState(false);
+
   const [isRegistered, setIsRegistered] = useState(!!lead.trading_account_id);
 
   const [formData, setFormData] = useState({
@@ -36,19 +41,29 @@ export default function PlatformRegistration({ lead }: Props) {
   });
 
   useEffect(() => {
+    if (lead.trading_account_id) {
+        setIsRegistered(true);
+    }
+  }, [lead.trading_account_id]);
+
+  useEffect(() => {
     if (successMsg) {
         const timer = setTimeout(() => setSuccessMsg(null), 4000);
         return () => clearTimeout(timer);
     }
   }, [successMsg]);
 
-  const generatePassword = () => {
+  const generatePassword = (isReset = false) => {
     const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%";
     let pass = "";
     for (let i = 0; i < 12; i++) {
         pass += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-    setFormData({ ...formData, password: pass });
+    if (isReset) {
+        setNewPassword(pass);
+    } else {
+        setFormData(prev => ({ ...prev, password: pass }));
+    }
   };
 
   const handleRegister = async () => {
@@ -60,26 +75,24 @@ export default function PlatformRegistration({ lead }: Props) {
     setLoading(true);
 
     try {
-        // 🛠️ FIX: Combine Name + Last Name
-        // We check for 'last_name' or 'surname' just in case your DB names it differently
         const firstName = lead.name || '';
         const lastName = lead.last_name || lead.surname || ''; 
         const fullName = `${firstName} ${lastName}`.trim();
 
         // 1. Create User in Auth System
-const { data, error } = await registrationClient.auth.signUp({
-    email: formData.login,
-    password: formData.password,
-    options: {
-        data: {
-            role: 'user',        
-            balance: 0,      
-            source: 'crm',
-            full_name: fullName,
-            kyc_status: 'unverified' 
-        }
-    }
-});
+        const { data, error } = await registrationClient.auth.signUp({
+            email: formData.login,
+            password: formData.password,
+            options: {
+                data: {
+                    role: 'user',        
+                    balance: 0,      
+                    source: 'crm',
+                    full_name: fullName,
+                    kyc_status: 'unverified' 
+                }
+            }
+        });
 
         if (error) throw error;
         if (!data.user?.id) throw new Error("No User ID returned");
@@ -91,7 +104,14 @@ const { data, error } = await registrationClient.auth.signUp({
             .eq('id', lead.id);
 
         setIsRegistered(true);
-        setSuccessMsg(`Trading Account Created Successfully! ID: ${data.user.id.slice(0, 8)}...`);
+        setSuccessMsg(`Trading Account Created Successfully!`);
+
+        // 3. 🔥 DELAYED REFRESH (So you see the popup)
+        if (onSuccess) {
+            setTimeout(() => {
+                onSuccess();
+            }, 1500); 
+        }
 
     } catch (err: any) {
         console.error("Registration Error:", err);
@@ -101,13 +121,45 @@ const { data, error } = await registrationClient.auth.signUp({
     }
   };
 
+  // --- NEW: PASSWORD UPDATE FUNCTION ---
+  const handleUpdatePassword = async () => {
+    if (!newPassword || newPassword.length < 6) {
+        alert("Password must be at least 6 characters");
+        return;
+    }
+    setUpdatingPass(true);
+
+    try {
+        // Calls your supabase function 'update-user'
+        const { error } = await supabase.functions.invoke('update-user', {
+            body: {
+                target_id: lead.trading_account_id,
+                updates: {
+                    password: newPassword
+                }
+            }
+        });
+
+        if (error) throw error;
+
+        setSuccessMsg("Password Updated Successfully!");
+        setNewPassword(''); 
+
+    } catch (err: any) {
+        console.error("Password Update Error:", err);
+        alert("Failed to update password: " + (err.message || "Server Error"));
+    } finally {
+        setUpdatingPass(false);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300 relative">
       
       {/* SUCCESS POPUP */}
       {successMsg && (
         <div className="fixed top-10 right-10 z-50 animate-in slide-in-from-top-10 fade-in duration-300">
-            <div className="bg-crm-bg border border-green-500/30 rounded-2xl shadow-2xl shadow-green-500/20 p-5 flex items-center gap-4 min-w-75 relative overflow-hidden">
+            <div className="bg-[#1e232d] border border-green-500/30 rounded-2xl shadow-2xl shadow-green-500/20 p-5 flex items-center gap-4 min-w-75 relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-1 h-full bg-linear-to-b from-green-400 to-emerald-600"></div>
                 <div className="p-3 bg-green-500/10 rounded-full text-green-400">
                     <CheckCircle size={24} />
@@ -124,7 +176,7 @@ const { data, error } = await registrationClient.auth.signUp({
       )}
 
       {/* HEADER */}
-      <div className="glass-panel p-6 rounded-2xl border border-white/5 flex items-center justify-between relative overflow-hidden">
+      <div className="bg-[#1e232d] p-6 rounded-2xl border border-white/5 flex items-center justify-between relative overflow-hidden">
         <div className="flex items-center gap-5 relative z-10">
             <div className={`w-14 h-14 rounded-xl flex items-center justify-center border ${isRegistered ? 'border-green-500/20 bg-green-500/10 text-green-400' : 'border-blue-500/20 bg-blue-500/10 text-blue-400'}`}>
                 {isRegistered ? <CheckCircle size={24} /> : <Server size={24} />}
@@ -139,21 +191,61 @@ const { data, error } = await registrationClient.auth.signUp({
       <div className="grid grid-cols-12 gap-6">
           
           {/* LEFT COLUMN */}
-          <div className="col-span-12 lg:col-span-7">
+          <div className="col-span-12 lg:col-span-7 space-y-6">
               {isRegistered ? (
-                  <div className="p-8 rounded-2xl border border-green-500/20 bg-green-500/5 text-center flex flex-col items-center justify-center h-full min-h-75">
-                      <div className="p-4 rounded-full bg-green-500/10 text-green-400 mb-4 shadow-[0_0_20px_rgba(74,222,128,0.2)]">
-                          <CheckCircle size={48} />
-                      </div>
-                      <h3 className="text-xl font-bold text-white mb-2">Registration Complete</h3>
-                      <p className="text-gray-400 text-sm max-w-xs mx-auto mb-6">
-                          This client already has a connected Trading Account. You cannot create a duplicate account.
-                      </p>
-                      <div className="flex items-center gap-2 px-4 py-2 bg-black/20 rounded-lg border border-white/10">
-                          <Lock size={14} className="text-gray-500" />
-                          <span className="text-xs text-gray-400 font-mono">ID: {lead.trading_account_id || 'LINKED'}</span>
-                      </div>
-                  </div>
+                  <>
+                    {/* 1. STATUS CARD */}
+                    <div className="p-8 rounded-2xl border border-green-500/20 bg-green-500/5 text-center flex flex-col items-center justify-center">
+                        <div className="p-4 rounded-full bg-green-500/10 text-green-400 mb-4 shadow-[0_0_20px_rgba(74,222,128,0.2)]">
+                            <CheckCircle size={48} />
+                        </div>
+                        <h3 className="text-xl font-bold text-white mb-2">Registration Complete</h3>
+                        <p className="text-gray-400 text-sm max-w-xs mx-auto mb-6">
+                            This client already has a connected Trading Account.
+                        </p>
+                        <div className="flex items-center gap-2 px-4 py-2 bg-black/20 rounded-lg border border-white/10">
+                            <Lock size={14} className="text-gray-500" />
+                            <span className="text-xs text-gray-400 font-mono">ID: {lead.trading_account_id || 'LINKED'}</span>
+                        </div>
+                    </div>
+
+                    {/* 2. PASSWORD CHANGE CARD (NEW) */}
+                    <div className="p-6 rounded-2xl border border-white/10 bg-white/5">
+                        <h3 className="text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2 mb-4">
+                            <Key size={16} className="text-yellow-400"/> Security & Access
+                        </h3>
+                        
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-[10px] text-gray-500 font-bold uppercase mb-1 block">Update Master Password</label>
+                                <div className="flex gap-2">
+                                    <input 
+                                        type="text" 
+                                        value={newPassword} 
+                                        onChange={(e) => setNewPassword(e.target.value)} 
+                                        placeholder="Enter new password"
+                                        className="flex-1 bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-500 outline-none transition"
+                                    />
+                                    <button 
+                                        onClick={() => generatePassword(true)} 
+                                        className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs font-bold text-yellow-400 transition cursor-pointer"
+                                    >
+                                        GEN
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <button 
+                                onClick={handleUpdatePassword}
+                                disabled={updatingPass || !newPassword}
+                                className="w-full py-3 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl transition shadow-lg shadow-yellow-500/20 flex items-center justify-center gap-2 cursor-pointer"
+                            >
+                                {updatingPass ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
+                                {updatingPass ? 'Updating...' : 'Update Password'}
+                            </button>
+                        </div>
+                    </div>
+                  </>
               ) : (
                   <div className="p-6 rounded-2xl border border-white/10 bg-white/5 space-y-6">
                      <h3 className="text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2">
@@ -190,7 +282,7 @@ const { data, error } = await registrationClient.auth.signUp({
                                 />
                             </div>
                             <button 
-                                onClick={generatePassword}
+                                onClick={() => generatePassword(false)}
                                 className="cursor-pointer px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-xs font-bold text-blue-400 hover:bg-white/10 transition"
                             >
                                 GEN
@@ -202,7 +294,7 @@ const { data, error } = await registrationClient.auth.signUp({
                      <button 
                         onClick={handleRegister}
                         disabled={loading || !formData.password || !formData.login}
-                        className="cursor-pointer w-full bg-linear-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition text-sm shadow-lg shadow-blue-500/20 mt-4 flex items-center justify-center gap-2"
+                        className="cursor-pointer w-full bg-linear-to-r from-blue-600 to-cyan-600 hover:from-blue-500..."
                      >
                         {loading ? <Loader2 className="animate-spin" size={16} /> : null}
                         {loading ? 'Creating in Database...' : 'CREATE TRADING ACCOUNT'}

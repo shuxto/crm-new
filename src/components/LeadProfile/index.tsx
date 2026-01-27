@@ -1,6 +1,6 @@
 import { io } from 'socket.io-client';
 import { useState, useEffect } from 'react';
-import { LayoutDashboard, FileText, PenTool, History, Trash2, Server, ArrowRightLeft, TrendingUp, Edit2, AlertTriangle, X, Briefcase } from 'lucide-react'; // <--- ADDED Briefcase
+import { LayoutDashboard, FileText, PenTool, History, Trash2, Server, ArrowRightLeft, TrendingUp, Edit2, AlertTriangle, X, Briefcase } from 'lucide-react'; 
 import { supabase } from '../../lib/supabase'; 
 import ProfileHeader from './ProfileHeader';
 import KYCSummary from './KYCSummary';
@@ -9,7 +9,7 @@ import PlatformRegistration from './PlatformRegistration';
 import LeadTransactions from './LeadTransactions';
 import LeadTradeHistory from './LeadTradeHistory';
 import LeadFinancials from './LeadFinancials';
-import TradingAccountsTab from './TradingAccountsTab'; // <--- NEW IMPORT
+import TradingAccountsTab from './TradingAccountsTab'; 
 
 // ⚠️ API KEY from twelwedata.ts
 const MARKET_SOCKET_URL = "wss://trading-production-169d.up.railway.app";
@@ -19,8 +19,31 @@ interface LeadProfilePageProps {
   onBack: () => void;
 }
 
-export default function LeadProfilePage({ lead, onBack }: LeadProfilePageProps) {
-  // <--- UPDATED TAB STATE
+export default function LeadProfilePage({ lead: initialLead, onBack }: LeadProfilePageProps) {
+  // --- 1. LOCAL STATE FIX ---
+  // We use local state 'activeLead' instead of the prop directly.
+  // This allows us to update the data instantly without a full page refresh.
+  const [activeLead, setActiveLead] = useState(initialLead);
+
+  // Sync state if the parent prop changes
+  useEffect(() => { setActiveLead(initialLead); }, [initialLead]);
+
+  // The "Self-Heal" Function: Fetches fresh data for THIS lead only
+  const refreshLeadData = async () => {
+      const { data } = await supabase
+          .from('crm_leads')
+          .select('*')
+          .eq('id', activeLead.id)
+          .single();
+      
+      if (data) {
+          setActiveLead(data);
+          // Optional: Clear trades to force a refresh there too if needed
+          setDbTrades([]); 
+      }
+  };
+
+  // --- TABS ---
   const [activeTab, setActiveTab] = useState<'overview' | 'resume' | 'update' | 'platform' | 'transactions' | 'history' | 'accounts'>(() => {
     const saved = localStorage.getItem('crm_profile_active_tab');
     return (saved as any) || 'overview';
@@ -48,24 +71,25 @@ export default function LeadProfilePage({ lead, onBack }: LeadProfilePageProps) 
 
   // --- 1. FETCH STATIC DB DATA ---
   useEffect(() => {
-    if (lead?.trading_account_id && activeTab === 'overview') {
+    // ✅ Using activeLead instead of lead
+    if (activeLead?.trading_account_id && activeTab === 'overview') {
         fetchOverviewData();
 
         // Listen for DB changes
         const channel = supabase
             .channel('crm-live-db')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'trades', filter: `user_id=eq.${lead.trading_account_id}` }, () => fetchOverviewData())
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'trading_accounts', filter: `user_id=eq.${lead.trading_account_id}` }, () => fetchOverviewData())
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'trades', filter: `user_id=eq.${activeLead.trading_account_id}` }, () => fetchOverviewData())
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'trading_accounts', filter: `user_id=eq.${activeLead.trading_account_id}` }, () => fetchOverviewData())
             .subscribe();
 
         return () => { supabase.removeChannel(channel); };
     }
-  }, [lead, activeTab]);
+  }, [activeLead, activeTab]);
 
   const fetchOverviewData = async () => {
     if (dbTrades.length === 0) setLoadingData(true);
     try {
-        const userId = lead.trading_account_id;
+        const userId = activeLead.trading_account_id;
         
         // 1. Get Main Wallet
         const { data: profile } = await supabase.from('profiles').select('balance').eq('id', userId).single();
@@ -96,7 +120,7 @@ export default function LeadProfilePage({ lead, onBack }: LeadProfilePageProps) 
     setLoadingData(false);
   };
 
-  // --- 2. SOCKET.IO CONNECTION (FINAL WORKING VERSION) ---
+  // --- 2. SOCKET.IO CONNECTION ---
   useEffect(() => {
     if (dbTrades.length === 0 || activeTab !== 'overview') return;
 
@@ -109,11 +133,9 @@ export default function LeadProfilePage({ lead, onBack }: LeadProfilePageProps) 
     });
 
     socket.on('connect', () => {
-        // 3. Send Subscribe Message
         socket.emit('subscribe', { action: "subscribe", params: { symbols } });
     });
 
-    // ✅ FIX: Listen for 'price_update' (detected by Spy)
     socket.on('price_update', (data: any) => {
         if (data && data.symbol && data.price) {
             setLivePrices(prev => ({
@@ -123,7 +145,6 @@ export default function LeadProfilePage({ lead, onBack }: LeadProfilePageProps) 
         }
     });
 
-    // Cleanup
     return () => {
         socket.disconnect();
     };
@@ -134,7 +155,6 @@ export default function LeadProfilePage({ lead, onBack }: LeadProfilePageProps) 
       const currentPrice = livePrices[trade.symbol] || trade.entry_price; 
       let pnl = 0;
       
-      // Formula: ((Current - Entry) / Entry) * Size
       if (trade.type === 'buy') {
           pnl = ((currentPrice - trade.entry_price) / trade.entry_price) * trade.size;
       } else {
@@ -179,7 +199,6 @@ export default function LeadProfilePage({ lead, onBack }: LeadProfilePageProps) 
       if (error) {
           alert("Error: " + error.message);
       } else {
-          // INSTANT UPDATE: Update local state immediately without waiting for fetch
           setDbTrades(prev => prev.map(t => 
              t.id === editingTrade.id ? { ...t, entry_price: newPrice } : t
           ));
@@ -195,24 +214,23 @@ export default function LeadProfilePage({ lead, onBack }: LeadProfilePageProps) 
   const [newNote, setNewNote] = useState('');
   const [savingNote, setSavingNote] = useState(false);
   const [userRole, setUserRole] = useState(''); 
-  useEffect(() => { if(lead?.id) { fetchNotes(); fetchUserRole(); } }, [lead.id]);
+  useEffect(() => { if(activeLead?.id) { fetchNotes(); fetchUserRole(); } }, [activeLead.id]);
   const fetchUserRole = async () => { const { data: { user } } = await supabase.auth.getUser(); setUserRole(user?.user_metadata?.role || 'conversion'); };
-  const fetchNotes = async () => { const { data } = await supabase.from('crm_lead_notes').select('*').eq('lead_id', lead.id).order('created_at', { ascending: false }); if (data) setNotes(data); };
-  const handleSaveNote = async () => { if (!newNote.trim()) return; setSavingNote(true); const { data: { user } } = await supabase.auth.getUser(); await supabase.from('crm_lead_notes').insert({ lead_id: lead.id, content: newNote, agent_email: user?.email }); setNewNote(''); fetchNotes(); setSavingNote(false); };
+  const fetchNotes = async () => { const { data } = await supabase.from('crm_lead_notes').select('*').eq('lead_id', activeLead.id).order('created_at', { ascending: false }); if (data) setNotes(data); };
+  const handleSaveNote = async () => { if (!newNote.trim()) return; setSavingNote(true); const { data: { user } } = await supabase.auth.getUser(); await supabase.from('crm_lead_notes').insert({ lead_id: activeLead.id, content: newNote, agent_email: user?.email }); setNewNote(''); fetchNotes(); setSavingNote(false); };
   const handleDeleteNote = async (id: string) => { if(confirm('Delete?')) { await supabase.from('crm_lead_notes').delete().eq('id', id); fetchNotes(); } };
   const canDelete = ['admin', 'manager', 'retention'].includes(userRole);
 
-  if (!lead) return null;
+  if (!activeLead) return null;
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-300 p-6 max-w-400 mx-auto w-full relative">
-      <ProfileHeader lead={lead} onBack={onBack} />
+      <ProfileHeader lead={activeLead} onBack={onBack} />
 
       {/* TABS */}
       <div className="flex items-center gap-2 mb-6 border-b border-white/10 pb-1 overflow-x-auto">
         <TabButton active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} icon={<LayoutDashboard size={16}/>} label="Overview" />
         
-        {/* NEW ACCOUNTS TAB BUTTON */}
         <TabButton active={activeTab === 'accounts'} onClick={() => setActiveTab('accounts')} icon={<Briefcase size={16}/>} label="Trading Accounts" />
         
         <TabButton active={activeTab === 'transactions'} onClick={() => setActiveTab('transactions')} icon={<ArrowRightLeft size={16}/>} label="Transactions" />
@@ -433,14 +451,21 @@ export default function LeadProfilePage({ lead, onBack }: LeadProfilePageProps) 
       )}
 
       {/* NEW ACCOUNTS TAB */}
-      {activeTab === 'accounts' && <TradingAccountsTab lead={lead} />}
+      {activeTab === 'accounts' && <TradingAccountsTab lead={activeLead} />}
 
       {/* OTHER TABS */}
-      {activeTab === 'transactions' && <LeadTransactions lead={lead} />}
-      {activeTab === 'history' && <LeadTradeHistory lead={lead} />}
-      {activeTab === 'resume' && <KYCSummary lead={lead} />}
-      {activeTab === 'update' && <KYCForm lead={lead} />}
-      {activeTab === 'platform' && <PlatformRegistration lead={lead} />}
+      {activeTab === 'transactions' && <LeadTransactions lead={activeLead} />}
+      {activeTab === 'history' && <LeadTradeHistory lead={activeLead} />}
+      {activeTab === 'resume' && <KYCSummary lead={activeLead} />}
+      {activeTab === 'update' && <KYCForm lead={activeLead} />}
+      
+      {/*  THIS IS THE FIX: Using activeLead and the refresh function */}
+      {activeTab === 'platform' && (
+        <PlatformRegistration 
+            lead={activeLead} 
+            onSuccess={refreshLeadData} 
+        />
+      )}
     </div>
   );
 }

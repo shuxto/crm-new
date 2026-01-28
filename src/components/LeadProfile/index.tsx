@@ -21,14 +21,12 @@ interface LeadProfilePageProps {
 
 export default function LeadProfilePage({ lead: initialLead, onBack }: LeadProfilePageProps) {
   // --- 1. LOCAL STATE FIX ---
-  // We use local state 'activeLead' instead of the prop directly.
-  // This allows us to update the data instantly without a full page refresh.
   const [activeLead, setActiveLead] = useState(initialLead);
 
   // Sync state if the parent prop changes
   useEffect(() => { setActiveLead(initialLead); }, [initialLead]);
 
-  // The "Self-Heal" Function: Fetches fresh data for THIS lead only
+  // The "Self-Heal" Function
   const refreshLeadData = async () => {
       const { data } = await supabase
           .from('crm_leads')
@@ -38,7 +36,6 @@ export default function LeadProfilePage({ lead: initialLead, onBack }: LeadProfi
       
       if (data) {
           setActiveLead(data);
-          // Optional: Clear trades to force a refresh there too if needed
           setDbTrades([]); 
       }
   };
@@ -71,7 +68,6 @@ export default function LeadProfilePage({ lead: initialLead, onBack }: LeadProfi
 
   // --- 1. FETCH STATIC DB DATA ---
   useEffect(() => {
-    // ✅ Using activeLead instead of lead
     if (activeLead?.trading_account_id && activeTab === 'overview') {
         fetchOverviewData();
 
@@ -120,16 +116,19 @@ export default function LeadProfilePage({ lead: initialLead, onBack }: LeadProfi
     setLoadingData(false);
   };
 
-  // --- 2. SOCKET.IO CONNECTION ---
+  // --- 2. SOCKET.IO CONNECTION (FIXED) ---
   useEffect(() => {
+    // Safety Checks
     if (dbTrades.length === 0 || activeTab !== 'overview') return;
 
     // 1. Prepare symbols string
     const symbols = Array.from(new Set(dbTrades.map(t => t.symbol))).join(',');
 
     // 2. Connect to Railway
+    // ✅ Added reconnectionAttempts to stabilize connection
     const socket = io(MARKET_SOCKET_URL, {
         transports: ['websocket', 'polling'],
+        reconnectionAttempts: 5, 
     });
 
     socket.on('connect', () => {
@@ -146,9 +145,17 @@ export default function LeadProfilePage({ lead: initialLead, onBack }: LeadProfi
     });
 
     return () => {
-        socket.disconnect();
+        // ✅ FIX: Only disconnect if fully connected to prevent console errors
+        if (socket.connected) {
+            socket.disconnect();
+        } else {
+            socket.off(); // Remove listeners
+            socket.close(); // Force close
+        }
     };
-  }, [dbTrades, activeTab]);
+    // ✅ FIX: Dependency changed from [dbTrades] to [dbTrades.length]
+    // This stops the infinite re-render loop that causes the WebSocket error.
+  }, [dbTrades.length, activeTab]);
 
   // --- 3. CALCULATE LIVE PnL ---
   const activeTradesWithLiveStats = dbTrades.map(trade => {

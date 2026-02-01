@@ -13,42 +13,48 @@ interface Note {
 interface NotesSidebarProps {
   lead: { id: string; name: string; surname: string; note_count?: number };
   onClose: () => void;
-  currentUserEmail?: string; // This is actually receiving the ID now
+  currentUserId?: string;
   role: string;
   onNoteCountChange: (newCount: number) => void;
 }
 
-export default function NotesSidebar({ lead, onClose, currentUserEmail, role, onNoteCountChange }: NotesSidebarProps) {
+export default function NotesSidebar({ lead, onClose, currentUserId, role, onNoteCountChange }: NotesSidebarProps) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [newNote, setNewNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [isClosing, setIsClosing] = useState(false);
   
-  // NEW: Store the Real Name here
+  // Animation State
+  const [isVisible, setIsVisible] = useState(false);
+  
   const [currentRealName, setCurrentRealName] = useState('Agent');
-  
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // --- HELPER: HANDLE CLOSING ANIMATION ---
+  // --- ANIMATION ON MOUNT ---
+  useEffect(() => {
+    const timer = setTimeout(() => setIsVisible(true), 10);
+    return () => clearTimeout(timer);
+  }, []);
+
   const handleClose = () => {
-    setIsClosing(true); 
-    setTimeout(() => { onClose(); }, 350);
+    setIsVisible(false); // Slide out
+    setTimeout(() => { onClose(); }, 300); // Wait for transition
   };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // 0. NEW: FETCH REAL NAME (Fixes the ID issue)
+  // 0. FIX: FETCH REAL NAME USING ID
   useEffect(() => {
     const fetchMyName = async () => {
-        if (!currentUserEmail) return;
-        // currentUserEmail holds the ID now. Let's get the name.
+        if (!currentUserId) return;
+        
+        // REMOVED unused 'error' variable here
         const { data } = await supabase
             .from('crm_users')
             .select('real_name')
-            .eq('id', currentUserEmail) // Compare ID to ID
+            .eq('id', currentUserId)
             .single();
         
         if (data?.real_name) {
@@ -56,7 +62,7 @@ export default function NotesSidebar({ lead, onClose, currentUserEmail, role, on
         }
     };
     fetchMyName();
-  }, [currentUserEmail]);
+  }, [currentUserId]);
 
   // 1. FETCH & SUBSCRIBE
   useEffect(() => {
@@ -79,7 +85,6 @@ export default function NotesSidebar({ lead, onClose, currentUserEmail, role, on
       .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_notes', filter: `lead_id=eq.${lead.id}` }, (payload) => {
         if (payload.eventType === 'INSERT') {
           const newNote = payload.new as Note;
-          // Prevent duplicates if our optimistic update already added it
           setNotes((prev) => {
             if (prev.some(n => n.id === newNote.id)) return prev;
             return [...prev, newNote];
@@ -103,16 +108,15 @@ export default function NotesSidebar({ lead, onClose, currentUserEmail, role, on
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // 3. SEND NOTE (OPTIMISTIC UPDATE - INSTANT)
+  // 3. SEND NOTE
   const handleSend = async () => {
     if (!newNote.trim()) return;
     setSending(true);
 
     const noteContent = newNote.trim();
-    // CHANGED: Use the fetched name, NOT the email/ID
     const authorName = currentRealName;
     
-    // A. INSTANTLY UPDATE UI (Fake ID)
+    // OPTIMISTIC UPDATE
     const tempId = Math.random().toString(36).substr(2, 9);
     const optimisticNote: Note = {
         id: tempId,
@@ -125,7 +129,6 @@ export default function NotesSidebar({ lead, onClose, currentUserEmail, role, on
     setNewNote('');
     setTimeout(scrollToBottom, 50); 
 
-    // B. SEND TO DB
     const { data, error } = await supabase
         .from('crm_notes')
         .insert({
@@ -138,9 +141,8 @@ export default function NotesSidebar({ lead, onClose, currentUserEmail, role, on
 
     if (error) {
       alert('Error sending note');
-      setNotes(prev => prev.filter(n => n.id !== tempId)); // Revert
+      setNotes(prev => prev.filter(n => n.id !== tempId));
     } else {
-      // C. SWAP FAKE ID WITH REAL ID
       setNotes(prev => prev.map(n => n.id === tempId ? data : n));
       const newCount = (notes.length || 0) + 1;
       onNoteCountChange(newCount); 
@@ -149,18 +151,18 @@ export default function NotesSidebar({ lead, onClose, currentUserEmail, role, on
     setSending(false);
   };
 
-  // 4. DELETE NOTE (OPTIMISTIC UPDATE - INSTANT)
+  // 4. DELETE NOTE
   const handleDelete = async (noteId: string) => {
     if (!confirm('Delete this note?')) return;
     
     const previousNotes = [...notes];
-    setNotes(prev => prev.filter(n => n.id !== noteId)); // Remove instantly
+    setNotes(prev => prev.filter(n => n.id !== noteId));
 
     const { error } = await supabase.from('crm_notes').delete().eq('id', noteId);
     
     if (error) {
        alert("Failed to delete");
-       setNotes(previousNotes); // Revert
+       setNotes(previousNotes);
     } else {
        const newCount = Math.max(0, notes.length - 1);
        onNoteCountChange(newCount);
@@ -177,49 +179,21 @@ export default function NotesSidebar({ lead, onClose, currentUserEmail, role, on
 
   const canDelete = role === 'admin' || role === 'manager';
 
-  // --- CSS KEYFRAMES ---
-  const animationStyles = `
-    @keyframes slideInRight {
-      from { transform: translateX(100%); opacity: 0; }
-      to { transform: translateX(0); opacity: 1; }
-    }
-    @keyframes slideOutRight {
-      from { transform: translateX(0); opacity: 1; }
-      to { transform: translateX(100%); opacity: 0; }
-    }
-    @keyframes fadeInBackdrop {
-      from { opacity: 0; }
-      to { opacity: 1; }
-    }
-    @keyframes fadeOutBackdrop {
-      from { opacity: 1; }
-      to { opacity: 0; }
-    }
-    
-    .animate-enter { animation: slideInRight 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-    .animate-exit { animation: slideOutRight 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-    
-    .backdrop-enter { animation: fadeInBackdrop 0.3s ease-out forwards; }
-    .backdrop-exit { animation: fadeOutBackdrop 0.3s ease-out forwards; }
-  `;
-
   return createPortal(
     <>
-      <style>{animationStyles}</style>
-      
-      {/* BACKDROP */}
+      {/* BACKDROP - Fixed z-index syntax */}
       <div 
-        className={`fixed inset-0 bg-[#000000]/60 backdrop-blur-md z-9998 ${isClosing ? 'backdrop-exit' : 'backdrop-enter'}`} 
+        className={`fixed inset-0 bg-black/60 z-9998 transition-opacity duration-300 ease-in-out ${isVisible ? 'opacity-100' : 'opacity-0'}`} 
         onClick={handleClose} 
       />
 
-      {/* SIDEBAR CONTAINER */}
-      <div className={`fixed top-0 right-0 h-full w-100 bg-[#020617]/95 border-l border-cyan-500/30 shadow-[0_0_50px_rgba(6,182,212,0.15)] z-9999 flex flex-col ${isClosing ? 'animate-exit' : 'animate-enter'}`}>
+      {/* SIDEBAR - Fixed width, background, and z-index syntax */}
+      <div 
+        className={`fixed top-0 right-0 h-full w-100 max-w-full bg-[#020617] border-l border-cyan-500/20 shadow-2xl z-9999 flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${isVisible ? 'translate-x-0' : 'translate-x-full'}`}
+      >
         
-        {/* HEADER (shrink-0 prevents squash) */}
-        <div className="p-5 border-b border-white/10 bg-crm-bg/50 flex justify-between items-center shadow-lg relative overflow-hidden shrink-0">
-          <div className="absolute top-0 left-0 w-full h-1 bg-linear-to-r from-cyan-500 via-blue-500 to-purple-500 opacity-50" />
-          
+        {/* HEADER - Fixed background color */}
+        <div className="p-5 border-b border-white/10 bg-crm-bg flex justify-between items-center shadow-lg shrink-0">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-cyan-500/10 rounded-lg border border-cyan-500/20 text-cyan-400">
                 <MessageSquare size={20} />
@@ -242,7 +216,7 @@ export default function NotesSidebar({ lead, onClose, currentUserEmail, role, on
         </div>
 
         {/* NOTES LIST */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar bg-linear-to-b from-[#020617] to-crm-bg">
+        <div className="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar bg-[#020617]">
           {loading ? (
             <div className="flex flex-col items-center justify-center h-64 text-gray-500 space-y-3 animate-pulse">
                 <Sparkles size={24} className="text-cyan-500/50" />
@@ -265,14 +239,12 @@ export default function NotesSidebar({ lead, onClose, currentUserEmail, role, on
                 <div className="absolute left-3 top-8 -bottom-5 w-px bg-white/5 last:hidden" />
                 
                 <div className="flex gap-3">
-                    {/* Avatar / Icon (shrink-0 protects from crushing) */}
                     <div className="shrink-0 mt-1">
                         <div className="w-7 h-7 rounded-lg bg-[#1e293b] flex items-center justify-center text-cyan-400 text-xs font-bold border border-white/10 shadow-inner">
                             {note.author_name ? note.author_name[0].toUpperCase() : <User size={12} />}
                         </div>
                     </div>
 
-                    {/* CONTENT BUBBLE WRAPPER (min-w-0 fixes horizontal scroll) */}
                     <div className="flex-1 min-w-0">
                         <div className="flex justify-between items-center mb-1.5">
                             <span className="text-xs font-bold text-cyan-200/90 truncate mr-2">{note.author_name}</span>
@@ -283,17 +255,17 @@ export default function NotesSidebar({ lead, onClose, currentUserEmail, role, on
                                 </span>
                                 {canDelete && (
                                     <button 
-                                        onClick={() => handleDelete(note.id)}
-                                        className="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400 transition cursor-pointer"
-                                        title="Delete Log"
+                                            onClick={() => handleDelete(note.id)}
+                                            className="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400 transition cursor-pointer"
+                                            title="Delete Log"
                                     >
-                                        <Trash2 size={12} />
+                                            <Trash2 size={12} />
                                     </button>
                                 )}
                             </div>
                         </div>
 
-                        {/* BUBBLE (wrap-break-word fixes overflow) */}
+                        {/* Fixed break-words syntax */}
                         <div className="bg-[#1e293b]/60 border border-white/5 p-3 rounded-tr-xl rounded-br-xl rounded-bl-xl text-sm text-gray-300 leading-relaxed shadow-sm hover:border-white/10 transition-colors wrap-break-word whitespace-pre-wrap">
                             {note.content}
                         </div>
@@ -305,12 +277,9 @@ export default function NotesSidebar({ lead, onClose, currentUserEmail, role, on
           <div ref={messagesEndRef} />
         </div>
 
-        {/* FOOTER INPUT (shrink-0 prevents squash) */}
+        {/* FOOTER INPUT - Fixed background colors and gradient syntax */}
         <div className="p-5 bg-[#020617] border-t border-white/10 relative z-20 shrink-0">
           <div className="relative group">
-            {/* Glowing border effect */}
-            <div className="absolute -inset-0.5 bg-linear-to-r from-cyan-500 to-blue-500 rounded-xl blur opacity-0 group-focus-within:opacity-20 transition duration-500" />
-            
             <textarea
               value={newNote}
               onChange={(e) => setNewNote(e.target.value)}

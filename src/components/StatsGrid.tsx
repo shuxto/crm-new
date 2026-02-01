@@ -50,8 +50,6 @@ export default function StatsGrid({ selectedStatuses, onToggleStatus, currentUse
     const handleInstantUpdate = (e: any) => {
         const { oldStatus, newStatus } = e.detail;
         setStats(currentStats => currentStats.map(stat => {
-            
-            // Handle spelling variations for Real-time Update
             const isTransferredStat = stat.label.includes('Transfer');
             const isNewTransferred = newStatus.includes('Transfer');
             const isOldTransferred = oldStatus?.includes('Transfer');
@@ -72,55 +70,54 @@ export default function StatsGrid({ selectedStatuses, onToggleStatus, currentUse
 
   async function fetchData() {
     try {
-      const { data: statusList } = await supabase
+      // 1. Fetch Status Definitions (Fast)
+      const statusQuery = supabase
         .from('crm_statuses')
         .select('*')
         .eq('is_active', true)
         .order('order_index', { ascending: true });
 
-      if (!statusList) return;
-
-      let query = supabase.from('crm_leads').select('status');
-
-      const isAdmin = ['admin', 'manager'].includes(role || '');
-      
-      // Filter by User ID if not admin
-      if (!isAdmin && currentUserId) {
-         query = query.eq('assigned_to', currentUserId);
-      } else if (!isAdmin && !currentUserId) {
-         // Security Fallback: If no ID, show nothing
-         query = query.eq('id', '00000000-0000-0000-0000-000000000000');
-      }
-
-      const { data: leadsData, error: leadsError } = await query;
-
-      if (leadsError) throw leadsError;
-
-      // Count Logic
-      const counts: Record<string, number> = {};
-      leadsData?.forEach((lead) => {
-        let s = lead.status || 'New';
-        // Normalize "Transfered" to "Transferred" just in case DB has old data
-        if (s === 'Transfered') s = 'Transferred'; 
-        counts[s] = (counts[s] || 0) + 1;
+      // 2. Fetch Counts using SERVER-SIDE RPC (Super Fast)
+      // We pass the user ID and role so the DB knows which leads to count
+      const countsQuery = supabase.rpc('get_lead_stats', { 
+        target_user_id: currentUserId || null,
+        user_role: role || 'conversion'
       });
 
-      // 1. FILTER: HIDE "UP SALE" AND "TRANSFERRED" FOR CONVERSION
+      // 3. Execute in Parallel
+      const [{ data: statusList }, { data: countsData, error }] = await Promise.all([
+          statusQuery,
+          countsQuery
+      ]);
+
+      if (error) throw error;
+      if (!statusList) return;
+
+      // 4. Map the DB counts to a simple object: { "New": 10, "FTD": 5 }
+      const counts: Record<string, number> = {};
+      
+      // Safety check: ensure countsData is an array
+      if (Array.isArray(countsData)) {
+          countsData.forEach((item: any) => {
+            let s = item.status || 'New';
+            if (s === 'Transfered') s = 'Transferred'; 
+            counts[s] = (counts[s] || 0) + parseInt(item.count);
+          });
+      }
+
+      // 5. Combine everything
       const finalStats = statusList
         .filter(st => {
             const l = st.label.toLowerCase().replace(/\s/g, ''); 
-
             if (role === 'conversion') {
-                // HIDE UP SALE
                 if (l.includes('upsale')) return false;
-                // HIDE TRANSFERRED (matches "Transferred", "Transfered", "Transfer")
                 if (l.includes('transfer')) return false; 
             }
             return true;
         })
         .map((st) => {
-            // Combine counts if needed
             let count = counts[st.label] || 0;
+            // Handle Transferred variations
             if (st.label === 'Transferred' || st.label === 'Transfered') {
                 count = (counts['Transferred'] || 0) + (counts['Transfered'] || 0);
             }

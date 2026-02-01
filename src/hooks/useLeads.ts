@@ -29,77 +29,99 @@ export function useLeads(filters: any, currentUserId?: string) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // --- FETCH DATA ---
+  // --- FETCH DATA (OPTIMIZED: PARALLEL REQUESTS) ---
   const fetchData = async () => {
     setLoading(true);
 
-    const { data: stData } = await supabase.from('crm_statuses').select('label, hex_color').eq('is_active', true).order('order_index', { ascending: true });
-    if (stData) setStatusOptions(stData);
-
-    const { data: agentData } = await supabase.from('crm_users').select('id, real_name, role').in('role', ['conversion', 'retention', 'team_leader']).order('real_name', { ascending: true });
-    if (agentData) setAgents(agentData);
-
-    let query = supabase.from('crm_leads')
-        .select('*', { count: 'exact' }) 
-        .order('created_at', { ascending: false })
-        .order('id', { ascending: false });
-
-    if (filters) {
-        if (filters.status?.length > 0) query = query.in('status', filters.status);
-        if (filters.search?.trim()) {
-            const s = filters.search.trim();
-            query = query.or(`name.ilike.%${s}%,surname.ilike.%${s}%,email.ilike.%${s}%,phone.ilike.%${s}%`);
-        }
-        if (filters.dateRange && filters.dateRange !== 'all') {
-            const now = new Date();
-            let dateStr = '';
-            if (filters.dateRange === 'today') {
-                dateStr = now.toISOString().split('T')[0];
-                query = query.gte('created_at', dateStr);
-            } else if (filters.dateRange === 'yesterday') {
-                const yest = new Date(now); yest.setDate(yest.getDate() - 1);
-                dateStr = yest.toISOString().split('T')[0];
-                const todayStr = now.toISOString().split('T')[0];
-                query = query.gte('created_at', dateStr).lt('created_at', todayStr);
-            }
-        }
-        if (filters.agent?.length > 0) query = query.in('assigned_to', filters.agent);
-        if (filters.source?.length > 0) query = query.in('source_file', filters.source);
-        if (filters.country?.length > 0) query = query.in('country', filters.country);
+    try {
+        // 1. BUILD QUERIES (Synchronous - No await yet)
         
-        // --- 1. PRO FIX: STRICT LOGIC ---
-        if (filters.tab === 'unassigned') {
-            query = query.is('assigned_to', null);
-        } 
-        else if (filters.tab === 'mine') {
-            if (currentUserId) {
-                // Happy Path: We have the ID, fetch their leads
-                query = query.eq('assigned_to', currentUserId); 
-            } else {
-                // SECURITY FALLBACK: User wants "Mine" but ID isn't ready.
-                // Fetch NOTHING. (Prevents the "Flash of All Leads")
-                query = query.eq('id', '00000000-0000-0000-0000-000000000000');
+        // Status Query
+        const statusQuery = supabase.from('crm_statuses').select('label, hex_color').eq('is_active', true).order('order_index', { ascending: true });
+        
+        // Agents Query
+        const agentsQuery = supabase.from('crm_users').select('id, real_name, role').in('role', ['conversion', 'retention', 'team_leader']).order('real_name', { ascending: true });
+
+        // Leads Query
+        let leadQuery = supabase.from('crm_leads')
+            .select('*', { count: 'exact' }) 
+            .order('created_at', { ascending: false })
+            .order('id', { ascending: false });
+
+        // Apply Filters to Lead Query
+        if (filters) {
+            if (filters.status?.length > 0) leadQuery = leadQuery.in('status', filters.status);
+            if (filters.search?.trim()) {
+                const s = filters.search.trim();
+                leadQuery = leadQuery.or(`name.ilike.%${s}%,surname.ilike.%${s}%,email.ilike.%${s}%,phone.ilike.%${s}%`);
             }
-        } 
-    }
+            if (filters.dateRange && filters.dateRange !== 'all') {
+                const now = new Date();
+                let dateStr = '';
+                if (filters.dateRange === 'today') {
+                    dateStr = now.toISOString().split('T')[0];
+                    leadQuery = leadQuery.gte('created_at', dateStr);
+                } else if (filters.dateRange === 'yesterday') {
+                    const yest = new Date(now); yest.setDate(yest.getDate() - 1);
+                    dateStr = yest.toISOString().split('T')[0];
+                    const todayStr = now.toISOString().split('T')[0];
+                    leadQuery = leadQuery.gte('created_at', dateStr).lt('created_at', todayStr);
+                }
+            }
+            if (filters.agent?.length > 0) leadQuery = leadQuery.in('assigned_to', filters.agent);
+            if (filters.source?.length > 0) leadQuery = leadQuery.in('source_file', filters.source);
+            if (filters.country?.length > 0) leadQuery = leadQuery.in('country', filters.country);
+            
+            // Strict Logic
+            if (filters.tab === 'unassigned') {
+                leadQuery = leadQuery.is('assigned_to', null);
+            } 
+            else if (filters.tab === 'mine') {
+                if (currentUserId) {
+                    leadQuery = leadQuery.eq('assigned_to', currentUserId); 
+                } else {
+                    // Security Fallback
+                    leadQuery = leadQuery.eq('id', '00000000-0000-0000-0000-000000000000');
+                }
+            } 
+        }
 
-    const page = filters?.page || 1;
-    const limit = filters?.limit || 50;
-    const from = (page - 1) * limit;
-    const to = from + limit - 1;
-    
-    query = query.range(from, to);
+        const page = filters?.page || 1;
+        const limit = filters?.limit || 50;
+        const from = (page - 1) * limit;
+        const to = from + limit - 1;
+        
+        leadQuery = leadQuery.range(from, to);
 
-    const { data, count, error } = await query;
-    
-    if (error) {
-        console.error("Error fetching leads:", error);
-        setLeads([]); 
-    } else {
-        setLeads(data || []);
-        setTotalCount(count || 0);
+        // 2. EXECUTE ALL REQUESTS IN PARALLEL
+        const [
+            { data: stData }, 
+            { data: agentData }, 
+            { data: leadsData, count, error: leadError }
+        ] = await Promise.all([
+            statusQuery,
+            agentsQuery,
+            leadQuery
+        ]);
+
+        // 3. SET STATE
+        if (stData) setStatusOptions(stData);
+        if (agentData) setAgents(agentData);
+        
+        if (leadError) {
+            console.error("Error fetching leads:", leadError);
+            setLeads([]); 
+        } else {
+            setLeads(leadsData || []);
+            setTotalCount(count || 0);
+        }
+
+    } catch (err) {
+        console.error("Critical fetch error:", err);
+        setLeads([]);
+    } finally {
+        setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {
@@ -114,15 +136,14 @@ export function useLeads(filters: any, currentUserId?: string) {
       
     return () => { supabase.removeChannel(leadSub); };
     
-    // --- FIX APPLIED HERE: Using stringify to prevent infinite loops ---
+    // Using stringify to prevent infinite loops (Preserved from original)
   }, [JSON.stringify(filters), currentUserId]); 
 
-  // --- ACTIONS ---
+  // --- ACTIONS (Untouched) ---
   const updateLocalLead = (id: string, updates: Partial<Lead>) => {
     setLeads(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l));
   };
 
-  // NEW: Instantly hide a lead (Used for Transfer logic)
   const removeLeadFromView = (id: string) => {
       setLeads(prev => prev.filter(l => l.id !== id));
       setTotalCount(prev => prev - 1);
@@ -175,6 +196,6 @@ export function useLeads(filters: any, currentUserId?: string) {
     leads, totalCount, statusOptions, agents, loading, 
     updateLeadStatus, updateLeadAgent, deleteLead,
     bulkUpdateStatus, bulkUpdateAgent, bulkDeleteLeads,
-    updateLocalLead, removeLeadFromView // <--- EXPORTED HERE
+    updateLocalLead, removeLeadFromView 
   };
 }

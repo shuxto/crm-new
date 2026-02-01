@@ -19,7 +19,7 @@ interface LeadsTableProps {
 
 type ActionType = 'transfer' | 'ftd' | 'upsale';
 
-export default function LeadsTable({ role = 'admin', filters, onLeadClick, currentUserEmail, onPageChange }: LeadsTableProps) {
+export default function LeadsTable({ role = 'admin', filters, onLeadClick, onPageChange }: LeadsTableProps) {
   
   const [currentUserId, setCurrentUserId] = useState<string | undefined>(undefined);
 
@@ -269,7 +269,7 @@ export default function LeadsTable({ role = 'admin', filters, onLeadClick, curre
 
       {kycLead && <KYCModal leadId={kycLead.id} leadName={`${kycLead.name} ${kycLead.surname}`} phone={kycLead.phone} email={kycLead.email} currentStatus={kycLead.kyc_status} onClose={() => setKycLead(null)} onUpdateStatus={() => {}} />}
       
-      {activeNoteLead && <NotesSidebar lead={activeNoteLead} onClose={() => setActiveNoteLead(null)} currentUserEmail={currentUserEmail} role={role} onNoteCountChange={(count) => {
+      {activeNoteLead && <NotesSidebar lead={activeNoteLead} onClose={() => setActiveNoteLead(null)} currentUserId={currentUserId} role={role} onNoteCountChange={(count) => {
           if (activeNoteLead) updateLocalLead(activeNoteLead.id, { note_count: count });
       }} />}
       
